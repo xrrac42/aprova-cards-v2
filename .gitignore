@@ -1,0 +1,17 @@
+*.env
+*.env.local
+.DS_Store
+vendor/
+dist/
+build/
+*.log
+*.out
+*.pem
+*.key
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.air
+tmp/

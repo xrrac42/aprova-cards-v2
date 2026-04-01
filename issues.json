@@ -1,0 +1,241 @@
+[
+  {
+    "title": "[AUTH] Implementar login admin",
+    "body": "## Objetivo\nImplementar endpoint POST /api/v1/auth/admin-login com rate limit de 5 requisições por 5 minutos.\n\n## Detalhes\n- Validar credenciais (email/password)\n- Retornar JWT token\n- Rate limit: 5/5min\n- Usar middleware de rate limit\n\n## Acceptance Criteria\n- [ ] Endpoint POST /api/v1/auth/admin-login funcional\n- [ ] JWT token gerado e retornado\n- [ ] Rate limit aplicado (5/5min)\n- [ ] Testes implementados\n\n## Referência\nPOST /api/v1/auth/admin-login\n",
+    "labels": [
+      "backend",
+      "auth",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[AUTH] Implementar validação de JWT",
+    "body": "## Objetivo\nImplementar endpoint POST /api/v1/auth/validate para validar tokens JWT.\n\n## Detalhes\n- Validar token JWT\n- Retornar dados do usuário se válido\n- Rejeitar se inválido/expirado\n\n## Acceptance Criteria\n- [ ] Endpoint POST /api/v1/auth/validate funcional\n- [ ] Valida JWT corretamente\n- [ ] Retorna erro 401 para token inválido\n\n## Referência\nPOST /api/v1/auth/validate\n",
+    "labels": [
+      "backend",
+      "auth",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[AUTH] Implementar refresh de token",
+    "body": "## Objetivo\nImplementar endpoint POST /api/v1/auth/refresh para renovar tokens JWT expirados.\n\n## Detalhes\n- Aceitar token expirado\n- Retornar novo token válido\n- Validar refresh token\n\n## Acceptance Criteria\n- [ ] Endpoint POST /api/v1/auth/refresh funcional\n- [ ] Novo token gerado corretamente\n- [ ] Testes implementados\n\n## Referência\nPOST /api/v1/auth/refresh\n",
+    "labels": [
+      "backend",
+      "auth",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[MENTORS] Implementar CRUD de Mentores",
+    "body": "## Objetivo\nImplementar endpoints completos de mentores (Create, Read, Update, Delete).\n\n## Detalhes\nEndpoints:\n- GET /api/v1/mentors - Listar mentores (admin only)\n- POST /api/v1/mentors - Criar mentor (admin only)\n- PUT /api/v1/mentors/{id} - Atualizar mentor (admin only)\n- DELETE /api/v1/mentors/{id} - Deletar mentor (admin only)\n\n## Estructura (Clean Architecture)\n- Model: Mentor entity\n- DTO: CreateMentorRequest, UpdateMentorRequest, MentorResponse\n- Repository: MentorRepository interface + implementação\n- UseCase: MentorUseCase com validações\n- Handler: MentorHandler\n\n## Acceptance Criteria\n- [ ] Todos os 4 endpoints implementados\n- [ ] Autenticação (admin only)\n- [ ] Testes de CRUD\n- [ ] Paginação no GET\n\n## Referência\nVer PATTERNS.md para exemplo completo\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[MENTORS] Gerar webhook token Kiwify",
+    "body": "## Objetivo\nImplementar endpoint para gerar token webhook Kiwify para cada mentor.\n\n## Detalhes\n- POST /api/v1/mentors/{id}/webhook-token\n- Gerar e salvar token único por mentor\n- Usar para validar webhooks do Kiwify\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Token gerado e armazenado\n- [ ] Token pode ser validado em webhooks\n\n## Referência\nPOST /api/v1/mentors/{id}/webhook-token\n",
+    "labels": [
+      "backend",
+      "feature",
+      "integrations"
+    ]
+  },
+  {
+    "title": "[PRODUCTS] Implementar CRUD de Produtos",
+    "body": "## Objetivo\nImplementar endpoints de produtos com controle de mentor.\n\n## Detalhes\nEndpoints:\n- GET /api/v1/products - Listar (mentor vê apenas seus)\n- POST /api/v1/products - Criar (mentor)\n- PUT /api/v1/products/{id} - Atualizar (mentor/admin)\n- DELETE /api/v1/products/{id} - Deletar (mentor/admin)\n\n## Estrutura (Clean Architecture)\n- Model: Product entity com MentorID\n- DTO: CreateProductRequest, ProductResponse\n- Repository: ProductRepository com GetByMentorID()\n- UseCase: ProductUseCase com validações\n- Handler: ProductHandler\n\n## Acceptance Criteria\n- [ ] Todos endpoints implementados\n- [ ] Mentor vê apenas seus produtos\n- [ ] Admin vê todos\n- [ ] Testes\n\n## Referência\nVer PATTERNS.md para padrão\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[PRODUCTS] Implementar endpoint de estatísticas",
+    "body": "## Objetivo\nImplementar endpoint GET /api/v1/products/{id}/stats com cache de 5 minutos.\n\n## Detalhes\n- Estatísticas do produto (alunos, cards, progresso)\n- Cache 5min (Redis ou in-memory)\n- Invalidar cache ao atualizar produto\n\n## Acceptance Criteria\n- [ ] Endpoint funcional\n- [ ] Cache 5min implementado\n- [ ] Cache invalidado ao atualizar\n\n## Referência\nGET /api/v1/products/{id}/stats\n",
+    "labels": [
+      "backend",
+      "feature",
+      "cache"
+    ]
+  },
+  {
+    "title": "[DISCIPLINES] Implementar CRUD de Disciplinas",
+    "body": "## Objetivo\nImplementar endpoints de disciplinas dentro de produtos.\n\n## Detalhes\nEndpoints:\n- GET /api/v1/products/{product_id}/disciplines - Listar\n- POST /api/v1/products/{product_id}/disciplines - Criar\n- PUT /api/v1/disciplines/{id} - Atualizar\n- DELETE /api/v1/disciplines/{id} - Deletar\n\n## Estrutura\n- Model: Discipline entity com ProductID\n- DTO: CreateDisciplineRequest, DisciplineResponse\n- Repository: DisciplineRepository\n- UseCase: DisciplineUseCase\n- Handler: DisciplineHandler\n\n## Acceptance Criteria\n- [ ] Todos endpoints implementados\n- [ ] Relacionamento com Product\n- [ ] Testes\n\n## Referência\nVer PATTERNS.md\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[DISCIPLINES] Implementar reordenação de disciplinas",
+    "body": "## Objetivo\nImplementar POST /api/v1/disciplines/{id}/reorder para reordenar disciplinas.\n\n## Detalhes\n- Aceitar nova ordem (array de IDs)\n- Atualizar campo 'order' em cada disciplina\n- Retornar lista ordenada\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Reordenação persiste\n- [ ] Retorna lista atualizada\n\n## Referência\nPOST /api/v1/disciplines/{id}/reorder\n",
+    "labels": [
+      "backend",
+      "feature"
+    ]
+  },
+  {
+    "title": "[CARDS] Implementar CRUD de Cartões",
+    "body": "## Objetivo\nImplementar endpoints CRUD para cartões de estudo (Core feature).\n\n## Detalhes\nEndpoints:\n- GET /api/v1/disciplines/{discipline_id}/cards - Listar paginado\n- POST /api/v1/disciplines/{discipline_id}/cards - Criar\n- PUT /api/v1/cards/{id} - Atualizar\n- DELETE /api/v1/cards/{id} - Deletar\n\n## Estrutura\n- Model: Card entity com DisciplineID\n- DTO: CreateCardRequest, UpdateCardRequest, CardResponse\n- Repository: CardRepository com paginação\n- UseCase: CardUseCase com validações\n- Handler: CardHandler\n\n## Acceptance Criteria\n- [ ] Todos endpoints implementados\n- [ ] Paginação funcional\n- [ ] Validações (Front/Back não vazios)\n- [ ] Testes\n\n## Referência\nVer PATTERNS.md\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-critical"
+    ]
+  },
+  {
+    "title": "[CARDS] Implementar aleatorização inteligente",
+    "body": "## Objetivo\nImplementar GET /api/v1/study-cards com aleatorização inteligente ⭐\n\n## Detalhes\nQuery params:\n- product_id (obrigatório)\n- discipline_id (opcional, null = all)\n- mode: review|new|mixed\n- new_limit: 50 (padrão)\n\nLógica:\n- Mode 'new': Retornar cartões novos\n- Mode 'review': Retornar em revisão\n- Mode 'mixed': Mix com limite de novos\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Todos os modos funcionam\n- [ ] Aleatorização funciona\n- [ ] Testes\n\n## Referência\nGET /api/v1/study-cards?product_id=xxx&mode=mixed&new_limit=50\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-critical",
+      "algorithm"
+    ]
+  },
+  {
+    "title": "[CARDS] Implementar batch import",
+    "body": "## Objetivo\nImplementar POST /api/v1/disciplines/{id}/cards/batch-import para importar cartões.\n\n## Detalhes\nSuportar formatos:\n- CSV: front,back,difficulty\n- JSON: array de cards\n- APKG: Anki deck format\n\n## Acceptance Criteria\n- [ ] CSV import funcional\n- [ ] JSON import funcional\n- [ ] APKG import funcional\n- [ ] Validação de duplicatas\n- [ ] Testes\n\n## Referência\nPOST /api/v1/disciplines/{id}/cards/batch-import\n",
+    "labels": [
+      "backend",
+      "feature",
+      "import",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[QUALITY] Implementar análise de qualidade com IA",
+    "body": "## Objetivo\nImplementar POST /api/v1/cards/analyze-quality para análise de cartões com IA.\n\n## Detalhes\n- Rate limit: 100 cartões/minuto\n- Usar LLM (OpenAI/Anthropic) para análise\n- Detectar:\n  - Clareza da pergunta\n  - Completude da resposta\n  - Ambiguidades\n- Retornar score e sugestões\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Rate limit (100/min)\n- [ ] Análise funcional\n- [ ] Sugestões retornadas\n\n## Referência\nPOST /api/v1/cards/analyze-quality\n",
+    "labels": [
+      "backend",
+      "feature",
+      "ai",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[QUALITY] Listar cartões com defeito",
+    "body": "## Objetivo\nImplementar GET /api/v1/cards/defective-list para listar cartões com problemas.\n\n## Detalhes\n- Retornar cartões com scores baixos\n- Paginação\n- Filtro por tipo de defeito\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Paginação funcional\n- [ ] Filtros trabalham\n\n## Referência\nGET /api/v1/cards/defective-list\n",
+    "labels": [
+      "backend",
+      "feature",
+      "quality"
+    ]
+  },
+  {
+    "title": "[STUDENTS] Implementar CRUD de Alunos",
+    "body": "## Objetivo\nImplementar endpoints de gerenciamento de alunos em produtos.\n\n## Detalhes\nEndpoints:\n- GET /api/v1/products/{product_id}/students - Listar\n- POST /api/v1/products/{product_id}/students - Adicionar aluno\n- PATCH /api/v1/students/{email}/access - Ativar/Desativar\n\n## Estrutura\n- Model: Student entity\n- DTO: AddStudentRequest, StudentResponse\n- Repository: StudentRepository\n- UseCase: StudentUseCase\n- Handler: StudentHandler\n\n## Acceptance Criteria\n- [ ] Endpoints implementados\n- [ ] Alunos associados a produtos\n- [ ] Controle de acesso\n- [ ] Testes\n\n## Referência\nVer PATTERNS.md\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[PROGRESS] Implementar endpoint de progresso",
+    "body": "## Objetivo\nImplementar GET /api/v1/students/{email}/progress com cache 5min.\n\n## Detalhes\nEstatísticas por aluno:\n- Total de cartões estudados\n- Cartões em revisão\n- Cartões aprendidos\n- % de progresso\n- Cache 5min\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Cache 5min\n- [ ] Estatísticas corretas\n- [ ] Invalidação de cache\n\n## Referência\nGET /api/v1/students/{email}/progress\n",
+    "labels": [
+      "backend",
+      "feature",
+      "cache",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[PROGRESS] Implementar sincronização de resposta",
+    "body": "## Objetivo\nImplementar POST /api/v1/students/{email}/progress/sync para sincronizar resposta de estudo.\n\n## Detalhes\n- Receber: card_id, difficulty, status\n- Atualizar status do cartão para aluno\n- Registrar em estudo history\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Progresso atualizado\n- [ ] History registrado\n\n## Referência\nPOST /api/v1/students/{email}/progress/sync\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[SESSIONS] Implementar sessões de estudo",
+    "body": "## Objetivo\nImplementar endpoints para controlar sessões de estudo.\n\n## Detalhes\nEndpoints:\n- POST /api/v1/sessions - Iniciar sessão\n- POST /api/v1/sessions/{id}/complete - Finalizar sessão\n\nRegistrar:\n- Start time\n- Cards estudados\n- Duration\n- Performance\n\n## Acceptance Criteria\n- [ ] Endpoints implementados\n- [ ] Sessions persistidas\n- [ ] Métricas registradas\n\n## Referência\nPOST /api/v1/sessions\nPOST /api/v1/sessions/{id}/complete\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[WEBHOOKS] Implementar webhook Kiwify",
+    "body": "## Objetivo\nImplementar POST /api/v1/webhooks/kiwify para receber eventos Kiwify com validação HMAC.\n\n## Detalhes\n- Validar assinatura HMAC\n- Processar eventos:\n  - purchase\n  - refund\n  - customer_update\n- Atualizar acesso de aluno\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] HMAC validation funciona\n- [ ] Eventos processados\n- [ ] Acesso atualizado\n\n## Referência\nPOST /api/v1/webhooks/kiwify\n",
+    "labels": [
+      "backend",
+      "feature",
+      "integrations",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[WEBHOOKS] Implementar logs de webhooks",
+    "body": "## Objetivo\nImplementar GET /api/v1/webhooks/logs para visualizar logs de webhooks.\n\n## Detalhes\n- Registrar todos os webhooks recebidos\n- Listar com filtros\n- Paginação\n- Mostrar status de processamento\n\n## Acceptance Criteria\n- [ ] Endpoint implementado\n- [ ] Logs persistidos\n- [ ] Filtros funcionam\n\n## Referência\nGET /api/v1/webhooks/logs\n",
+    "labels": [
+      "backend",
+      "feature",
+      "logging"
+    ]
+  },
+  {
+    "title": "[FEEDBACK] Implementar feedback de usuários",
+    "body": "## Objetivo\nImplementar endpoints de feedback com rate limit.\n\n## Detalhes\nEndpoints:\n- POST /api/v1/feedbacks - Enviar feedback (rate: 1/hora)\n- GET /api/v1/products/{id}/feedbacks - Listar feedbacks do produto\n\nRate limit: 1 por hora por usuário\n\n## Acceptance Criteria\n- [ ] Endpoints implementados\n- [ ] Rate limit (1/hora)\n- [ ] Feedbacks persistidos\n\n## Referência\nPOST /api/v1/feedbacks\nGET /api/v1/products/{id}/feedbacks\n",
+    "labels": [
+      "backend",
+      "feature",
+      "priority-medium"
+    ]
+  },
+  {
+    "title": "[INFRA] Implementar middleware de autenticação JWT",
+    "body": "## Objetivo\nImplementar middleware de validação JWT em todas as rotas protegidas.\n\n## Detalhes\n- Validar JWT em cada request\n- Extrair user context\n- Rejeitar requisições sem token válido\n- Excluir /health de autenticação\n\n## Acceptance Criteria\n- [ ] Middleware implementado\n- [ ] JWT validado em rotas protegidas\n- [ ] /health não requer auth\n\n## Referência\nVer pkg/middleware/middleware.go\n",
+    "labels": [
+      "backend",
+      "infrastructure",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[INFRA] Implementar rate limiting",
+    "body": "## Objetivo\nImplementar rate limiting global e por usuário.\n\n## Detalhes\n- Global: 100 req/min\n- Por usuário: 1000 req/hora\n- Usar Redis para estado distribuído\n- Retornar 429 quando limite atingido\n\n## Acceptance Criteria\n- [ ] Rate limit global implementado\n- [ ] Rate limit por usuário\n- [ ] Redis integration\n- [ ] Tests\n\n## Referência\npkg/middleware/middleware.go\n",
+    "labels": [
+      "backend",
+      "infrastructure",
+      "priority-high"
+    ]
+  },
+  {
+    "title": "[INFRA] Setup de migrations com GORM",
+    "body": "## Objetivo\nImplementar sistema de migrations com GORM para versionamento do banco.\n\n## Detalhes\n- Auto migrations para todas as entities\n- Versionamento de schema\n- Rollback capability\n- Seed data\n\n## Acceptance Criteria\n- [ ] Migrations implementadas\n- [ ] Todos models migram\n- [ ] Rollback funciona\n\n## Referência\ninternal/models/models.go\n",
+    "labels": [
+      "backend",
+      "infrastructure",
+      "database"
+    ]
+  },
+  {
+    "title": "[INFRA] Implementar logging estruturado",
+    "body": "## Objetivo\nImplementar logging estruturado com Zap.\n\n## Detalhes\n- Logar todas as operações importantes\n- Estruturado (JSON)\n- Níveis: debug, info, warn, error\n- Arquivo + stdout\n\n## Acceptance Criteria\n- [ ] Zap integrado\n- [ ] Logs estruturados\n- [ ] Níveis funcionam\n\n## Referência\npkg/middleware/middleware.go\n",
+    "labels": [
+      "backend",
+      "infrastructure",
+      "logging"
+    ]
+  },
+  {
+    "title": "[INFRA] Implementar testes automatizados",
+    "body": "## Objetivo\nImplementar suite de testes (unitários + integração).\n\n## Detalhes\n- Testes de handlers\n- Testes de usecases\n- Testes de repositories\n- Mocks para dependências\n- Coverage > 80%\n\n## Acceptance Criteria\n- [ ] Testes implementados\n- [ ] Coverage > 80%\n- [ ] CI/CD configurado\n- [ ] Tests executam no PR\n\n## Referência\ntests/\n",
+    "labels": [
+      "backend",
+      "infrastructure",
+      "testing",
+      "priority-high"
+    ]
+  }
+]

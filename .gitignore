@@ -1,0 +1,39 @@
+# ============================================================
+# Aprova Cards Monorepo - .gitignore
+# ============================================================
+
+# ----- Backend (Go) -----
+backend/bin/
+backend/coverage.out
+backend/tmp/
+
+# ----- Frontend (Node/React) -----
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# ----- Environment -----
+.env
+.env.*
+!.env.example
+
+# ----- IDE -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- OS -----
+*.log
+*.pid
+*.seed
+
+# ----- Docker -----
+docker-compose.override.yml
+
+# ----- Supabase -----
+supabase/.temp/

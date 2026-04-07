@@ -1,0 +1,1 @@
+ALTER TABLE public.mentors ADD COLUMN IF NOT EXISTS kiwify_webhook_token text;

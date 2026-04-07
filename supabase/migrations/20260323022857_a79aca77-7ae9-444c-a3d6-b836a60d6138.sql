@@ -1,0 +1,1 @@
+ALTER TABLE public.student_sessions ALTER COLUMN discipline_id DROP NOT NULL;

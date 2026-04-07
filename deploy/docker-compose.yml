@@ -1,0 +1,61 @@
+# ============================================================
+# Aprova Cards - Docker Compose (Coolify / VPS)
+# ============================================================
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up --build -d
+#
+# Note: Database is hosted on Supabase (external).
+#       No local DB container needed.
+# ============================================================
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: aprova-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aprova-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_PUBLISHABLE_KEY=${VITE_SUPABASE_PUBLISHABLE_KEY}
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+    container_name: aprova-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - aprova-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+networks:
+  aprova-network:
+    driver: bridge

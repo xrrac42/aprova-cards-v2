@@ -1,0 +1,1 @@
+ALTER TABLE public.mentors ADD COLUMN IF NOT EXISTS accent_color text DEFAULT '#ffd166';

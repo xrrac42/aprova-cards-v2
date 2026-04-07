@@ -1,0 +1,7 @@
+project_id = "fgcbolvyvjbmycbcdrfi"
+
+[functions.kiwify-webhook]
+verify_jwt = false
+
+[functions.system-health-check]
+verify_jwt = false

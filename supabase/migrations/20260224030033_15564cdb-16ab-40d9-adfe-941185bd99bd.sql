@@ -1,0 +1,1 @@
+ALTER TABLE public.student_access ADD COLUMN IF NOT EXISTS inactive_reason text;

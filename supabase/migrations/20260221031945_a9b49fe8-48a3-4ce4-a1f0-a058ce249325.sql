@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS idx_cards_discipline_product ON public.cards(discipline_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_progress_email_product_review ON public.student_progress(student_email, product_id, next_review);

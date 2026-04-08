@@ -10,6 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { login } from '@/lib/auth';
 import { supabase } from '@/integrations/supabase/client';
 import { applyMentorTheme, resetTheme } from '@/lib/theme';
+import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
@@ -23,6 +24,7 @@ const LoginPage: React.FC = () => {
   const [mentorLoading, setMentorLoading] = useState(!!slug);
   const [mentorNotFound, setMentorNotFound] = useState(false);
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!slug) {
@@ -56,11 +58,38 @@ const LoginPage: React.FC = () => {
     setLoadingMessage('Verificando acesso...');
 
     try {
-      const { redirect } = await login(email, password, (msg) => setLoadingMessage(msg));
-      navigate(redirect);
+      const { redirect, session } = await login(email, password, (msg) => setLoadingMessage(msg));
+      
+      // 🎉 Popup de sucesso
+      toast({
+        title: '✅ Login realizado com sucesso!',
+        description: `Bem-vindo ${session.email}!`,
+        duration: 3000,
+      });
+
+      console.log('🔐 Usuário autenticado:', {
+        email: session.email,
+        role: session.role,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Redirecionar após breve pausa para o usuário ver o toast
+      setTimeout(() => {
+        navigate(redirect);
+      }, 1500);
     } catch (err: any) {
       const motivo = err.message || 'Erro desconhecido';
       setError(motivo);
+
+      // 🚨 Popup de erro
+      toast({
+        title: '❌ Erro ao fazer login',
+        description: motivo,
+        variant: 'destructive',
+        duration: 5000,
+      });
+
+      console.error('❌ Erro no login:', motivo);
 
       // Diagnóstico detalhado para o painel de saúde
       let diagnostico = '';

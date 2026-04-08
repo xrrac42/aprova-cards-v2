@@ -34,97 +34,266 @@ export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+/**
+ * Valida um JWT token do Supabase
+ * Retorna os dados do usuário se o token for válido
+ * Rejeita com erro 401 se inválido/expirado
+ */
+export async function validateToken(token: string): Promise<{ email: string; uid: string; expiresAt: number }> {
+  try {
+    // Usar a sessão do Supabase para validar o token
+    const { data, error } = await supabase.auth.getUser(token);
+
+    if (error || !data.user) {
+      throw new Error('Token inválido ou expirado');
+    }
+
+    return {
+      email: data.user.email || '',
+      uid: data.user.id,
+      expiresAt: data.user.user_metadata?.expires_at || Date.now(),
+    };
+  } catch (error) {
+    throw {
+      status: 401,
+      message: error instanceof Error ? error.message : 'Token inválido ou expirado',
+    };
+  }
+}
+
+/**
+ * Refresh do token JWT usando a sessão do Supabase
+ */
+export async function refreshToken(refreshToken: string) {
+  try {
+    const { data, error } = await supabase.auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+
+    if (error || !data.session) {
+      throw new Error('Não foi possível renovar o token');
+    }
+
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresAt: data.session.expires_at,
+    };
+  } catch (error) {
+    throw {
+      status: 401,
+      message: error instanceof Error ? error.message : 'Erro ao renovar token',
+    };
+  }
+}
+
 export type LoginProgress = (message: string) => void;
 
+/**
+ * Autentica usuário com Supabase Auth
+ * Valida credenciais reais contra base de dados do Supabase
+ */
 export async function login(
   email: string,
   password: string,
   onProgress?: LoginProgress
-): Promise<{ session: Session; redirect: string }> {
-  onProgress?.('Verificando acesso...');
+): Promise<{ session: Session; redirect: string; accessToken: string; refreshToken: string }> {
+  onProgress?.('Autenticando com Supabase...');
 
-  // 1. Check admin via edge function (kept for security — password not in client)
-  //    but run in PARALLEL with mentor + product queries
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedPassword = password.trim();
   const normalizedCode = trimmedPassword.toUpperCase();
 
-  // 1. Admin — verificação via edge function (usa secrets do servidor)
-  const { data: adminCheck } = await supabase.functions.invoke('check-admin', {
-    body: { email: normalizedEmail, password: trimmedPassword },
+  // 1. Tentar autenticação real com Supabase Auth
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: trimmedPassword,
   });
 
-  if (adminCheck?.isAdmin) {
-    const session: Session = { email: normalizedEmail, role: 'admin' };
-    setSession(session);
-    return { session, redirect: '/admin' };
-  }
+  // Se falhou, poderia ser mentor ou aluno (verificar lógica antiga)
+  if (authError) {
+    onProgress?.('Verificando acesso alternativo...');
 
-  // 2. Mentor + Produto em paralelo (apenas 2 queries)
-  const [mentorResult, productResult] = await Promise.all([
-    supabase
+    // 2. Verificar se é admin via edge function
+    const { data: adminCheck } = await supabase.functions.invoke('check-admin', {
+      body: { email: normalizedEmail, password: trimmedPassword },
+    });
+
+    if (adminCheck?.isAdmin) {
+      const session: Session = { email: normalizedEmail, role: 'admin' };
+      setSession(session);
+      return { 
+        session, 
+        redirect: '/admin',
+        accessToken: adminCheck?.token || '',
+        refreshToken: '',
+      };
+    }
+
+    // 3. Verificar mentor (email + mentor_password na tabela mentors)
+    const { data: mentorResult } = await supabase
       .from('mentors')
       .select('id, name')
       .eq('email', normalizedEmail)
       .eq('mentor_password', trimmedPassword)
-      .maybeSingle(),
-    supabase
-      .from('products')
-      .select('id, name, mentor_id')
-      .eq('access_code', normalizedCode)
-      .eq('active', true)
-      .maybeSingle(),
-  ]);
+      .maybeSingle();
 
-  // 3. Mentor?
-  if (mentorResult.data) {
-    const mentor = mentorResult.data;
-    const session: Session = { email: normalizedEmail, role: 'mentor', mentor_id: mentor.id, mentor_name: mentor.name };
-    setSession(session);
-    return { session, redirect: '/mentor' };
+    if (mentorResult) {
+      const session: Session = { 
+        email: normalizedEmail, 
+        role: 'mentor', 
+        mentor_id: mentorResult.id, 
+        mentor_name: mentorResult.name 
+      };
+      setSession(session);
+      return { 
+        session, 
+        redirect: '/mentor',
+        accessToken: '',
+        refreshToken: '',
+      };
+    }
+
+    throw new Error('Email ou senha inválidos.');
   }
 
-  // 4. Product found? → verify student access
-  const product = productResult.data;
-  if (!product) {
-    throw new Error('Código de acesso inválido.');
+  if (!authData.session) {
+    throw new Error('Falha ao criar sessão. Tente novamente.');
   }
 
-  onProgress?.('Verificando seu acesso...');
+  const user = authData.session.user;
+  const accessToken = authData.session.access_token;
+  const refreshTokenValue = authData.session.refresh_token || '';
 
-  // Run student access check + mentor visual data in parallel
-  const [accessResult, mentorDataResult] = await Promise.all([
-    supabase
+  onProgress?.('Verificando seu perfil...');
+
+  // 4. Verificar role do usuário: verifica se é produto/aluno
+  const { data: productResult } = await supabase
+    .from('products')
+    .select('id, name, mentor_id, access_code')
+    .eq('access_code', normalizedCode)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (productResult) {
+    onProgress?.('Verificando acesso do aluno...');
+
+    // Verificar se email está em student_access
+    const { data: accessResult, error: accessError } = await supabase
       .from('student_access')
       .select('id, active')
-      .eq('email', normalizedEmail)
-      .eq('product_id', product.id)
-      .maybeSingle(),
-    supabase
+      .eq('email', user.email)
+      .eq('product_id', productResult.id)
+      .maybeSingle();
+
+    if (accessError || !accessResult) {
+      throw new Error('E-mail não encontrado no produto. Verifique se usou o e-mail da compra.');
+    }
+
+    if (!accessResult.active) {
+      throw new Error('Seu acesso foi cancelado. Entre em contato com o mentor.');
+    }
+
+    // Obter dados do mentor
+    const { data: mentorData } = await supabase
       .from('mentors')
       .select('id, name, primary_color, secondary_color, logo_url')
-      .eq('id', product.mentor_id)
-      .maybeSingle(),
-  ]);
+      .eq('id', productResult.mentor_id)
+      .maybeSingle();
 
-  const access = accessResult.data;
-  if (!access) {
-    throw new Error('E-mail não encontrado. Verifique se usou o e-mail da compra.');
+    onProgress?.('Carregando seu material...');
+
+    const session: Session = {
+      email: user.email || normalizedEmail,
+      role: 'aluno',
+      product_id: productResult.id,
+      mentor_id: mentorData?.id,
+      mentor_name: mentorData?.name,
+    };
+
+    setSession(session);
+    return { 
+      session, 
+      redirect: '/aluno',
+      accessToken,
+      refreshToken: refreshTokenValue,
+    };
   }
-  if (!access.active) {
-    throw new Error('Seu acesso foi cancelado. Entre em contato com o mentor.');
+
+  // Se chegou aqui, é um usuário autenticado Supabase que não é aluno
+  const session: Session = {
+    email: user.email || normalizedEmail,
+    role: 'aluno', // Default role
+  };
+
+  setSession(session);
+  return { 
+    session, 
+    redirect: '/aluno',
+    accessToken,
+    refreshToken: refreshTokenValue,
+  };
+}
+
+/**
+ * Registra novo usuário com Supabase Auth
+ * Cria user real na base de dados
+ */
+export async function signup(
+  email: string,
+  password: string,
+  onProgress?: LoginProgress
+): Promise<{ user: any; session: Session }> {
+  onProgress?.('Criando conta...');
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  const { data: signupData, error: signupError } = await supabase.auth.signUp({
+    email: normalizedEmail,
+    password,
+  });
+
+  if (signupError) {
+    throw new Error(signupError.message);
   }
 
-  onProgress?.('Carregando seu material...');
+  if (!signupData.user) {
+    throw new Error('Falha ao criar usuário.');
+  }
 
-  const mentorData = mentorDataResult.data;
+  onProgress?.('Conta criada com sucesso!');
+
   const session: Session = {
     email: normalizedEmail,
     role: 'aluno',
-    product_id: product.id,
-    mentor_id: mentorData?.id,
-    mentor_name: mentorData?.name,
   };
+
   setSession(session);
-  return { session, redirect: '/aluno' };
+
+  return {
+    user: signupData.user,
+    session,
+  };
+}
+
+/**
+ * Faz logout do usuário
+ * Limpa sessão local e do Supabase
+ */
+export async function logout(): Promise<void> {
+  await supabase.auth.signOut();
+  clearSession();
+}
+
+/**
+ * Obtém sessão atual do Supabase
+ */
+export async function getCurrentSession() {
+  const { data, error } = await supabase.auth.getSession();
+  
+  if (error || !data.session) {
+    return null;
+  }
+
+  return data.session;
 }

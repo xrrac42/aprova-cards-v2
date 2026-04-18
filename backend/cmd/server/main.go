@@ -16,25 +16,27 @@ import (
 )
 
 func main() {
-	// Carregar configuração
 	cfg := config.Load()
 
-	// Conectar ao banco
 	db := connectDatabase(cfg)
 
-	// Setup Gin
-	engine := gin.Default()
+	if cfg.Server.Env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	engine := gin.New()
+	engine.Use(gin.Recovery())
 
-	// Middlewares
+	// Global middlewares
 	engine.Use(middleware.RequestLogger())
 	engine.Use(middleware.ErrorHandler())
 	engine.Use(middleware.CORSMiddleware(cfg.CORS.AllowedOrigins))
-	engine.Use(middleware.RateLimitMiddleware())
 
-	// Injeção de dependências e rotas
-	setupRoutes(engine, db)
+	// Global rate limiter: 100 req/min per IP
+	globalLimiter := middleware.NewRateLimiter(cfg.RateLimit.Requests, cfg.RateLimit.WindowSeconds)
+	engine.Use(middleware.RateLimitByIP(globalLimiter))
 
-	// Iniciar servidor
+	setupRoutes(engine, db, cfg)
+
 	port := ":" + cfg.Server.Port
 	fmt.Printf("🚀 Server running on http://localhost%s\n", port)
 
@@ -46,10 +48,14 @@ func main() {
 func connectDatabase(cfg *config.Config) *gorm.DB {
 	dsn := cfg.GetDSN()
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
+	logMode := logger.Info
+	if cfg.Server.Env == "production" {
+		logMode = logger.Warn
+	}
 
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logMode),
+	})
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
@@ -58,25 +64,109 @@ func connectDatabase(cfg *config.Config) *gorm.DB {
 	return db
 }
 
-func setupRoutes(engine *gin.Engine, db *gorm.DB) {
+func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api := engine.Group("/api/v1")
 
-	// Health check - Sem autenticação, com verificação real do banco
+	// ---- Health (public) ----
 	healthHandler := handlers.NewHealthHandler(db)
 	api.GET("/health", healthHandler.Check)
 
-	// Sample routes - Exemplo de CRUD completo com Handler -> UseCase -> Repository
-	sampleRepo := repositories.NewSampleRepository(db)
-	sampleUseCase := usecases.NewSampleUseCase(sampleRepo)
-	sampleHandler := handlers.NewSampleHandler(sampleUseCase)
+	// ---- Auth (public, stricter rate limit: 5 req / 5 min) ----
+	authLimiter := middleware.NewRateLimiter(5, 300)
+	mentorRepo := repositories.NewMentorRepository(db)
+	authUC := usecases.NewAuthUseCase(mentorRepo, cfg.Admin.Email, cfg.Admin.Password)
+	authHandler := handlers.NewAuthHandler(authUC, cfg.JWT.Secret, cfg.JWT.Expiration)
 
-	samples := api.Group("/samples")
+	authGroup := api.Group("/auth")
+	authGroup.Use(middleware.RateLimitByIP(authLimiter))
 	{
-		samples.POST("", sampleHandler.Create)       // POST /api/v1/samples
-		samples.GET("", sampleHandler.GetAll)        // GET /api/v1/samples?page=1&page_size=10
-		samples.GET("/:id", sampleHandler.GetByID)   // GET /api/v1/samples/:id
-		samples.PUT("/:id", sampleHandler.Update)    // PUT /api/v1/samples/:id
-		samples.DELETE("/:id", sampleHandler.Delete) // DELETE /api/v1/samples/:id
+		authGroup.POST("/admin-login", authHandler.AdminLogin)
+	}
+
+	// ---- Feedback (public for students via X-Student-Email header) ----
+	feedbackRepo := repositories.NewFeedbackRepository(db)
+	feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo)
+	api.POST("/feedbacks", feedbackHandler.Create)
+
+	// ---- Protected routes (JWT required) ----
+	protected := api.Group("")
+	protected.Use(middleware.AuthMiddleware(cfg.JWT.Secret))
+	{
+		// -- Mentors (admin only) --
+		mentorUC := usecases.NewMentorUseCase(mentorRepo)
+		mentorHandler := handlers.NewMentorHandler(mentorUC)
+		mentors := protected.Group("/mentors")
+		mentors.Use(middleware.AdminOnly())
+		{
+			mentors.POST("", mentorHandler.Create)
+			mentors.GET("", mentorHandler.GetAll)
+			mentors.GET("/:id", mentorHandler.GetByID)
+			mentors.PUT("/:id", mentorHandler.Update)
+			mentors.DELETE("/:id", mentorHandler.Delete)
+		}
+
+		// -- Products (admin/mentor) --
+		productRepo := repositories.NewProductRepository(db)
+		productUC := usecases.NewProductUseCase(productRepo)
+		productHandler := handlers.NewProductHandler(productUC)
+		products := protected.Group("/products")
+		{
+			products.POST("", productHandler.Create)
+			products.GET("", productHandler.GetAll)
+			products.GET("/:id", productHandler.GetByID)
+			products.PUT("/:id", productHandler.Update)
+			products.DELETE("/:id", productHandler.Delete)
+		}
+
+		// -- Disciplines within product (separate group to avoid wildcard conflict) --
+		discRepo := repositories.NewDisciplineRepository(db)
+		discUC := usecases.NewDisciplineUseCase(discRepo)
+		discHandler := handlers.NewDisciplineHandler(discUC)
+		protected.GET("/products/:id/disciplines", discHandler.GetByProductID)
+		protected.POST("/products/:id/disciplines", discHandler.Create)
+
+		// -- Students within product --
+		studentRepo := repositories.NewStudentAccessRepository(db)
+		studentHandler := handlers.NewStudentHandler(studentRepo)
+		protected.GET("/products/:id/students", studentHandler.GetByProductID)
+		protected.POST("/products/:id/students", studentHandler.AddStudent)
+
+		// -- Feedbacks for product --
+		protected.GET("/products/:id/feedbacks", feedbackHandler.GetByProductID)
+
+		// -- Disciplines (standalone) --
+		discRepo2 := repositories.NewDisciplineRepository(db)
+		discUC2 := usecases.NewDisciplineUseCase(discRepo2)
+		discHandler2 := handlers.NewDisciplineHandler(discUC2)
+		disciplines := protected.Group("/disciplines")
+		{
+			disciplines.PUT("/:id", discHandler2.Update)
+			disciplines.DELETE("/:id", discHandler2.Delete)
+			disciplines.POST("/:id/reorder", discHandler2.Reorder)
+		}
+
+		// -- Cards within discipline --
+		cardRepo := repositories.NewCardRepository(db)
+		cardUC := usecases.NewCardUseCase(cardRepo, discRepo2)
+		cardHandler := handlers.NewCardHandler(cardUC)
+		protected.GET("/disciplines/:id/cards", cardHandler.GetByDisciplineID)
+		protected.POST("/disciplines/:id/cards", cardHandler.Create)
+
+		// -- Cards (standalone) --
+		cardRepo2 := repositories.NewCardRepository(db)
+		discRepo3 := repositories.NewDisciplineRepository(db)
+		cardUC2 := usecases.NewCardUseCase(cardRepo2, discRepo3)
+		cardHandler2 := handlers.NewCardHandler(cardUC2)
+		cards := protected.Group("/cards")
+		{
+			cards.PUT("/:id", cardHandler2.Update)
+			cards.DELETE("/:id", cardHandler2.Delete)
+		}
+
+		// -- Students (standalone) --
+		studentRepo2 := repositories.NewStudentAccessRepository(db)
+		studentHandler2 := handlers.NewStudentHandler(studentRepo2)
+		protected.PATCH("/students/:email/access", studentHandler2.UpdateAccess)
 	}
 
 	fmt.Println("✅ Routes registered successfully")

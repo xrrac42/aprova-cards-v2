@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	Admin     AdminConfig
 	Server    ServerConfig
 	Database  DatabaseConfig
 	JWT       JWTConfig
@@ -68,6 +69,10 @@ func Load() *Config {
 		CORS: CORSConfig{
 			AllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
 		},
+		Admin: AdminConfig{
+			Email:    getEnv("ADMIN_EMAIL", "admin@aprovacards.com"),
+			Password: getEnv("ADMIN_PASSWORD", "admin123"),
+		},
 		RateLimit: RateLimitConfig{
 			Enabled:       getEnvBool("RATE_LIMIT_ENABLED", true),
 			Requests:      getEnvInt("RATE_LIMIT_REQUESTS", 100),
@@ -108,4 +113,9 @@ func getEnvBool(key string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return val == "true" || val == "1" || val == "yes"
+}
+
+type AdminConfig struct {
+	Email    string
+	Password string
 }

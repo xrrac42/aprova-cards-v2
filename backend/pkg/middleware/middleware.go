@@ -58,10 +58,3 @@ func CORSMiddleware(allowedOrigins string) gin.HandlerFunc {
 	}
 }
 
-// RateLimitMiddleware simples (melhore com redis em produção)
-func RateLimitMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// TODO: Implementar rate limit com redis
-		c.Next()
-	}
-}

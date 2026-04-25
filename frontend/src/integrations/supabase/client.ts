@@ -2,7 +2,12 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const normalizeSupabaseUrl = (url: string) => {
+  // Accept legacy values like https://<ref>.supabase.co/rest/v1 and normalize to project URL.
+  return url.replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
+};
+
+const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL || '');
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 // Import the supabase client like this:

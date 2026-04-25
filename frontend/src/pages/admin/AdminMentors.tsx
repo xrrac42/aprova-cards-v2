@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
 import { AdminLayout } from './AdminDashboard';
-import { Plus, Edit, Trash2, Search, Loader2, Eye, Upload, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Loader2, Eye, Copy, Check, AlertTriangle } from 'lucide-react';
 
 const AdminMentors: React.FC = () => {
   const navigate = useNavigate();
@@ -12,11 +12,14 @@ const AdminMentors: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorModalMessage, setErrorModalMessage] = useState('');
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', email: '', slug: '', mentor_password: 'MENTOR2025', primary_color: '#6c63ff', secondary_color: '#43e97b', kiwify_webhook_token: '' });
+  const [form, setForm] = useState({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const slugTooShort = form.slug.trim().length > 0 && form.slug.trim().length < 3;
 
   const baseUrl = window.location.origin;
 
@@ -27,6 +30,20 @@ const AdminMentors: React.FC = () => {
   };
 
   const generateSlug = (name: string) => name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  const getFriendlyErrorMessage = (raw: string) => {
+    const message = (raw || '').toLowerCase();
+    if (message.includes('mentor email already exists')) {
+      return 'Ja existe um mentor com esse e-mail. Use outro e-mail para continuar.';
+    }
+    if (message.includes('email_key') || message.includes('duplicate key')) {
+      return 'Esse e-mail ja esta em uso. Verifique e tente novamente.';
+    }
+    if (message.includes('column "email" of relation "mentors" does not exist')) {
+      return 'Seu banco esta desatualizado: falta a coluna mentors.email. Rode as migrations mais recentes e tente novamente.';
+    }
+    return raw || 'Erro ao salvar mentor.';
+  };
 
   useEffect(() => {
     if (!session || session.role !== 'admin') { navigate('/login'); return; }
@@ -41,41 +58,75 @@ const AdminMentors: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', email: '', slug: '', mentor_password: 'MENTOR2025', primary_color: '#6c63ff', secondary_color: '#43e97b', kiwify_webhook_token: '' });
+    setForm({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b' });
     setLogoFile(null);
     setShowModal(true);
   };
 
   const openEdit = (m: any) => {
     setEditing(m);
-    setForm({ name: m.name, email: m.email || '', slug: m.slug, mentor_password: m.mentor_password, primary_color: m.primary_color, secondary_color: m.secondary_color, kiwify_webhook_token: m.kiwify_webhook_token || '' });
+    setForm({ name: m.name, email: m.email || '', slug: m.slug, password: '', primary_color: m.primary_color, secondary_color: m.secondary_color });
     setLogoFile(null);
     setShowModal(true);
   };
 
   const save = async () => {
     setSaving(true);
-    let logoUrl = editing?.logo_url || null;
+    try {
+      let logoUrl = editing?.logo_url || null;
 
-    if (logoFile) {
-      const ext = logoFile.name.split('.').pop();
-      const path = `${form.slug || 'mentor'}-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
-      if (!error) {
-        const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
-        logoUrl = urlData.publicUrl;
+      if (logoFile) {
+        const ext = logoFile.name.split('.').pop();
+        const path = `${form.slug || 'mentor'}-${Date.now()}.${ext}`;
+        const { error } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
+        if (!error) {
+          const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
+          logoUrl = urlData.publicUrl;
+        }
       }
-    }
 
-    const payload = { ...form, email: form.email || null, kiwify_webhook_token: form.kiwify_webhook_token || null, logo_url: logoUrl };
-    if (editing) {
-      await supabase.from('mentors').update(payload).eq('id', editing.id);
-    } else {
-      await supabase.from('mentors').insert(payload);
+      const payload = { name: form.name, email: form.email || null, slug: form.slug, primary_color: form.primary_color, secondary_color: form.secondary_color, logo_url: logoUrl };
+      if (editing) {
+        await supabase.from('mentors').update(payload).eq('id', editing.id);
+      } else {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (!accessToken) {
+          throw new Error('Sessao expirada. Faca login novamente como admin.');
+        }
+
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
+        const response = await fetch(`${apiBase}/admin/mentors/provision`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            name: form.name,
+            email: form.email,
+            slug: form.slug,
+            password: form.password,
+            primary_color: form.primary_color,
+            secondary_color: form.secondary_color,
+            logo_url: logoUrl,
+          }),
+        });
+
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'Falha ao provisionar mentor');
+        }
+      }
+
+      setShowModal(false);
+      load();
+    } catch (error: any) {
+      setErrorModalMessage(getFriendlyErrorMessage(error?.message || 'Erro ao salvar mentor'));
+      setShowErrorModal(true);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowModal(false);
-    load();
   };
 
   const deleteMentor = async (id: string) => {
@@ -117,7 +168,7 @@ const AdminMentors: React.FC = () => {
                       </div>
                       <div className="min-w-0">
                         <p className="font-display font-semibold text-foreground truncate">{m.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{m.email || 'Sem e-mail'} · <span className="font-mono">{m.mentor_password}</span></p>
+                        <p className="text-xs text-muted-foreground truncate">{m.email || 'Sem e-mail'}</p>
                       </div>
                     </div>
                     <div className="flex gap-1 shrink-0">
@@ -186,8 +237,10 @@ const AdminMentors: React.FC = () => {
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Slug (URL)</label>
               <input type="text" value={form.slug}
                 onChange={e => setForm(f => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
-                className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors" />
-              <p className="mt-1 text-[11px] text-muted-foreground">Gerado automaticamente a partir do nome</p>
+                className={`w-full rounded-xl border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors ${slugTooShort ? 'border-destructive' : 'border-border'}`} />
+              <p className={`mt-1 text-[11px] ${slugTooShort ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {slugTooShort ? 'Slug deve ter pelo menos 3 caracteres.' : 'Gerado automaticamente a partir do nome (minimo 3 caracteres).'}
+              </p>
             </div>
             
             {/* E-mail */}
@@ -200,13 +253,15 @@ const AdminMentors: React.FC = () => {
               <p className="mt-1 text-[11px] text-muted-foreground">Usado no login do painel mentor</p>
             </div>
             
-            {/* Senha */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Senha do mentor</label>
-              <input type="text" value={form.mentor_password}
-                onChange={e => setForm(f => ({ ...f, mentor_password: e.target.value }))}
-                className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors" />
-            </div>
+            {!editing && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Senha de acesso (Auth)</label>
+                <input type="password" value={form.password}
+                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors" />
+                <p className="mt-1 text-[11px] text-muted-foreground">A senha sera criada no Supabase Auth e nao armazenada em plaintext.</p>
+              </div>
+            )}
             
             {/* Cores */}
             <div className="flex gap-4">
@@ -236,22 +291,29 @@ const AdminMentors: React.FC = () => {
               )}
             </div>
             
-            {/* Token Webhook */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Token Webhook Kiwify</label>
-              <input type="text" value={form.kiwify_webhook_token}
-                onChange={e => setForm(f => ({ ...f, kiwify_webhook_token: e.target.value }))}
-                className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors"
-                placeholder="Cole aqui o token do webhook" />
-              <p className="mt-1 text-[11px] text-muted-foreground">Após criar o webhook na Kiwify (Apps → Webhooks), copie o token gerado e cole aqui</p>
-            </div>
-            
             <div className="flex gap-2 pt-1">
-              <button onClick={save} disabled={saving || !form.name || !form.slug}
+              <button onClick={save} disabled={saving || !form.name || !form.slug || form.slug.trim().length < 3 || (!editing && !form.password)}
                 className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-medium text-primary-foreground disabled:opacity-50">
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar
               </button>
               <button onClick={() => setShowModal(false)} className="flex-1 rounded-xl border border-border py-3 font-medium text-foreground">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showErrorModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowErrorModal(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-lg font-semibold text-foreground">Nao foi possivel salvar o mentor</h3>
+            <p className="mt-3 text-sm text-muted-foreground">{errorModalMessage}</p>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setShowErrorModal(false)}
+                className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Entendi
+              </button>
             </div>
           </div>
         </div>

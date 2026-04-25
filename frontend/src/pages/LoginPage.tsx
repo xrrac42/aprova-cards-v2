@@ -72,9 +72,12 @@ const LoginPage: React.FC = () => {
         role: session.role,
         timestamp: new Date().toISOString(),
       });
+      
+      console.log('📍 Redirecionando para:', redirect);
 
       // Redirecionar após breve pausa para o usuário ver o toast
       setTimeout(() => {
+        console.log('⏩ Executando navigate para:', redirect);
         navigate(redirect);
       }, 1500);
     } catch (err: any) {

@@ -10,6 +10,7 @@ import type { Session } from '@/types';
 
 const SESSION_KEY = 'flashcard_session';
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+const ENABLE_EDGE_ADMIN_CHECK = import.meta.env.VITE_ENABLE_EDGE_ADMIN_CHECK === 'true';
 
 export function getSession(): Session | null {
   const raw = localStorage.getItem(SESSION_KEY);
@@ -115,43 +116,25 @@ export async function login(
     onProgress?.('Verificando acesso alternativo...');
 
     // 2. Verificar se é admin via edge function
-    const { data: adminCheck } = await supabase.functions.invoke('check-admin', {
-      body: { email: normalizedEmail, password: trimmedPassword },
-    });
+    if (ENABLE_EDGE_ADMIN_CHECK) {
+      try {
+        const { data: adminCheck } = await supabase.functions.invoke('check-admin', {
+          body: { email: normalizedEmail, password: trimmedPassword },
+        });
 
-    if (adminCheck?.isAdmin) {
-      const session: Session = { email: normalizedEmail, role: 'admin' };
-      setSession(session);
-      return { 
-        session, 
-        redirect: '/admin',
-        accessToken: adminCheck?.token || '',
-        refreshToken: '',
-      };
-    }
-
-    // 3. Verificar mentor (email + mentor_password na tabela mentors)
-    const { data: mentorResult } = await supabase
-      .from('mentors')
-      .select('id, name')
-      .eq('email', normalizedEmail)
-      .eq('mentor_password', trimmedPassword)
-      .maybeSingle();
-
-    if (mentorResult) {
-      const session: Session = { 
-        email: normalizedEmail, 
-        role: 'mentor', 
-        mentor_id: mentorResult.id, 
-        mentor_name: mentorResult.name 
-      };
-      setSession(session);
-      return { 
-        session, 
-        redirect: '/mentor',
-        accessToken: '',
-        refreshToken: '',
-      };
+        if (adminCheck?.isAdmin) {
+          const session: Session = { email: normalizedEmail, role: 'admin' };
+          setSession(session);
+          return {
+            session,
+            redirect: '/admin',
+            accessToken: adminCheck?.token || '',
+            refreshToken: '',
+          };
+        }
+      } catch {
+        // Ignore missing edge function in environments where admin is not validated via Supabase Functions.
+      }
     }
 
     throw new Error('Email ou senha inválidos.');
@@ -175,61 +158,60 @@ export async function login(
     .eq('active', true)
     .maybeSingle();
 
-  if (productResult) {
-    onProgress?.('Verificando acesso do aluno...');
+  // Check user_roles table to get the correct role
+  onProgress?.('Verificando seu perfil...');
+  
+  const { data: userRoleResult } = await supabase
+    .from('user_roles')
+    .select('role, mentor_id, product_id, active')
+    .eq('email', user.email)
+    .maybeSingle();
 
-    // Verificar se email está em student_access
-    const { data: accessResult, error: accessError } = await supabase
-      .from('student_access')
-      .select('id, active')
-      .eq('email', user.email)
-      .eq('product_id', productResult.id)
-      .maybeSingle();
-
-    if (accessError || !accessResult) {
-      throw new Error('E-mail não encontrado no produto. Verifique se usou o e-mail da compra.');
-    }
-
-    if (!accessResult.active) {
-      throw new Error('Seu acesso foi cancelado. Entre em contato com o mentor.');
-    }
-
-    // Obter dados do mentor
-    const { data: mentorData } = await supabase
-      .from('mentors')
-      .select('id, name, primary_color, secondary_color, logo_url')
-      .eq('id', productResult.mentor_id)
-      .maybeSingle();
-
-    onProgress?.('Carregando seu material...');
-
-    const session: Session = {
-      email: user.email || normalizedEmail,
-      role: 'aluno',
-      product_id: productResult.id,
-      mentor_id: mentorData?.id,
-      mentor_name: mentorData?.name,
-    };
-
-    setSession(session);
-    return { 
-      session, 
-      redirect: '/aluno',
-      accessToken,
-      refreshToken: refreshTokenValue,
-    };
+  if (!userRoleResult || !userRoleResult.active) {
+    throw new Error('Seu acesso foi desativado. Entre em contato com o administrador.');
   }
 
-  // Se chegou aqui, é um usuário autenticado Supabase que não é aluno
+  const userRole = (userRoleResult.role as 'aluno' | 'mentor' | 'admin') || 'aluno';
+  let redirectPath = '/aluno';
+  let sessionMentorId: string | undefined;
+  let sessionProductId: string | undefined;
+
+  if (userRole === 'admin') {
+    redirectPath = '/admin';
+  } else if (userRole === 'mentor') {
+    redirectPath = '/mentor';
+    sessionMentorId = userRoleResult.mentor_id || undefined;
+  } else if (userRole === 'aluno' && productResult) {
+    redirectPath = '/aluno';
+    sessionProductId = productResult.id;
+    sessionMentorId = productResult.mentor_id;
+  }
+
+  // Obter dados do mentor se necessário
+  let mentorData = null;
+  if (sessionMentorId) {
+    const { data } = await supabase
+      .from('mentors')
+      .select('id, name, primary_color, secondary_color, logo_url')
+      .eq('id', sessionMentorId)
+      .maybeSingle();
+    mentorData = data;
+  }
+
+  onProgress?.('Carregando seu material...');
+
   const session: Session = {
     email: user.email || normalizedEmail,
-    role: 'aluno', // Default role
+    role: userRole,
+    product_id: sessionProductId,
+    mentor_id: mentorData?.id,
+    mentor_name: mentorData?.name,
   };
 
   setSession(session);
   return { 
     session, 
-    redirect: '/aluno',
+    redirect: redirectPath,
     accessToken,
     refreshToken: refreshTokenValue,
   };

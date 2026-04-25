@@ -8,6 +8,7 @@ import CardContent from '@/components/CardContent';
 import { ArrowLeft, Plus, Trash2, Upload, Search, Edit, BookOpen, CreditCard, X, Check, Loader2, GripVertical, ChevronDown, ChevronRight, Download, AlertTriangle, Settings, ImageIcon, Copy } from 'lucide-react';
 import CloneDisciplineModal from '@/components/CloneDisciplineModal';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 
 
 const CARDS_PAGE_SIZE = 50;
@@ -69,28 +70,60 @@ const ProductManager: React.FC = () => {
   }, [activeTab, selectedDisciplineId, cardsPage, searchQuery]);
 
   const loadDisciplines = async () => {
-    setLoading(true);
-    const { data: prod } = await supabase.from('products').select('*, mentors(name)').eq('id', productId).maybeSingle();
-    setProduct(prod);
+      if (!productId) {
+        toast.error('Produto inválido');
+        return;
+      }
 
-    // Use count for disciplines — no card data downloaded
-    const { data: discs } = await supabase
-      .from('disciplines')
-      .select('*, cards(count)')
-      .eq('product_id', productId)
-      .order('order');
+      setLoading(true);
+      const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+      try {
+        // Fetch product from Supabase (for mentor info)
+        const { data: prod, error: prodErr } = await supabase
+          .from('products')
+          .select('*, mentors(name)')
+          .eq('id', productId)
+          .maybeSingle();
+        if (prodErr) throw prodErr;
+        setProduct(prod);
 
-    setDisciplines(discs || []);
+        // Fetch disciplines from backend (fallback to protected route for older server builds)
+        let resp = await fetch(`${backendURL}/api/v1/admin/products/${productId}/disciplines`);
+        if (resp.status === 404) {
+          resp = await fetch(`${backendURL}/api/v1/products/${productId}/disciplines`);
+        }
+        if (!resp.ok) {
+          const bodyText = await resp.text();
+          throw new Error(`Erro ao carregar disciplinas (${resp.status}): ${bodyText || 'sem detalhe'}`);
+        }
+        const respData = await resp.json();
+        const discs = respData?.data || [];
 
-    // Get total card count
-    const { count } = await supabase
-      .from('cards')
-      .select('*', { count: 'exact', head: true })
-      .eq('product_id', productId);
-    setTotalCardCount(count || 0);
+        // Fetch card counts for each discipline
+        const disciplinesWithCount = await Promise.all(
+          (discs || []).map(async (d: any) => {
+            const { count } = await supabase
+              .from('cards')
+              .select('*', { count: 'exact', head: true })
+              .eq('discipline_id', d.id);
+            return { ...d, card_count: count || 0 };
+          })
+        );
+        setDisciplines(disciplinesWithCount);
 
-    setLoading(false);
-  };
+        // Fetch total card count
+        const { count, error: countErr } = await supabase
+          .from('cards')
+          .select('*', { count: 'exact', head: true })
+          .eq('product_id', productId);
+        if (countErr) throw countErr;
+        setTotalCardCount(count || 0);
+      } catch (err: any) {
+        toast.error(`Erro ao carregar disciplinas: ${err?.message || 'erro desconhecido'}`);
+      } finally {
+        setLoading(false);
+      }
+    };
 
   const loadCardsPage = async () => {
     setCardsLoading(true);
@@ -118,7 +151,9 @@ const ProductManager: React.FC = () => {
   };
 
   const getDiscCardCount = (disc: any) => {
-    return disc.cards?.[0]?.count || 0;
+    const fromCardCount = disc.card_count;
+    const fromCards = disc.cards?.[0]?.count;
+    return fromCardCount ?? fromCards ?? 0;
   };
 
   const exportDisciplineCSV = async (disc: any) => {
@@ -160,12 +195,50 @@ const ProductManager: React.FC = () => {
 
   // Discipline CRUD
   const saveDiscipline = async () => {
+    if (!disciplineName.trim()) {
+      toast.error('Informe o nome da disciplina.');
+      return;
+    }
+    if (!productId) {
+      toast.error('Produto inválido para criar disciplina.');
+      return;
+    }
+
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+
     if (editingDiscipline) {
-      await supabase.from('disciplines').update({ name: disciplineName }).eq('id', editingDiscipline.id);
+      const resp = await fetch(`${backendURL}/api/v1/admin/disciplines/${editingDiscipline.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: disciplineName.trim() }),
+      });
+
+      if (!resp.ok) {
+        const error = await resp.json();
+        toast.error(`Erro ao atualizar disciplina: ${error.error || 'Erro desconhecido'}`);
+        return;
+      }
+      toast.success('Disciplina atualizada com sucesso.');
     } else {
       const nextOrder = disciplines.length;
-      await supabase.from('disciplines').insert({ product_id: productId!, name: disciplineName, order: nextOrder });
+      const resp = await fetch(`${backendURL}/api/v1/admin/products/${productId}/disciplines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          product_id: productId,
+          name: disciplineName.trim(), 
+          order: nextOrder 
+        }),
+      });
+
+      if (!resp.ok) {
+        const error = await resp.json();
+        toast.error(`Erro ao criar disciplina: ${error.error || 'Erro desconhecido'}`);
+        return;
+      }
+      toast.success('Disciplina criada com sucesso.');
     }
+
     setShowDisciplineModal(false);
     setEditingDiscipline(null);
     setDisciplineName('');
@@ -197,16 +270,22 @@ const ProductManager: React.FC = () => {
     setDragIndex(null);
     setDragOverIndex(null);
 
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
     await Promise.all(
       reordered.map((disc, idx) =>
-        supabase.from('disciplines').update({ order: idx }).eq('id', disc.id)
+        fetch(`${backendURL}/api/v1/admin/disciplines/${disc.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: idx }),
+        })
       )
     );
   };
 
   const deleteDiscipline = async (id: string) => {
     if (!confirm('Excluir disciplina e todos os cards?')) return;
-    await supabase.from('disciplines').delete().eq('id', id);
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+    await fetch(`${backendURL}/api/v1/admin/disciplines/${id}`, { method: 'DELETE' });
     loadDisciplines();
   };
 

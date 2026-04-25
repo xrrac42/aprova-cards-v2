@@ -1,7 +1,7 @@
 package dto
 
 type CreateDisciplineRequest struct {
-	ProductID string `json:"product_id" binding:"required"`
+	ProductID string `json:"product_id"`
 	Name      string `json:"name" binding:"required,min=2"`
 	Order     int    `json:"order"`
 }

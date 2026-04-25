@@ -553,6 +553,7 @@ const AIAnalysisTab: React.FC = () => {
   // Product/discipline name maps
   const [discMap, setDiscMap] = useState<Record<string, string>>({});
   const [prodMap, setProdMap] = useState<Record<string, string>>({});
+  const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
   useEffect(() => {
     const loadFilters = async () => {
@@ -625,17 +626,22 @@ const AIAnalysisTab: React.FC = () => {
         setProgressInfo({ current: Math.min(i + BATCH, allCards.length), total: allCards.length });
 
         try {
-          const resp = await supabase.functions.invoke('analyze-cards-ai', {
-            body: { cards: batch.map(c => ({ id: c.id, front: c.front, back: c.back })) },
+          const resp = await fetch(`${backendURL}/api/v1/admin/cards/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cards: batch.map(c => ({ id: c.id, front: c.front, back: c.back })),
+            }),
           });
 
-          if (resp.error) {
-            console.error('Batch error:', resp.error);
+          if (!resp.ok) {
+            console.error('Batch error:', resp.status);
             skipped++;
             continue;
           }
 
-          const data = resp.data;
+          const jsonResp = await resp.json();
+          const data = jsonResp?.data;
           if (data?.parse_error || !data?.resultados) {
             skipped++;
             continue;

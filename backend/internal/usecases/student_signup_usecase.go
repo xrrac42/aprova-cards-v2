@@ -14,6 +14,8 @@ import (
 	"github.com/approva-cards/back-aprova-cards/pkg/auth"
 	"github.com/approva-cards/back-aprova-cards/pkg/errors"
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v79"
+	checkoutsession "github.com/stripe/stripe-go/v79/checkout/session"
 )
 
 type StudentSignUpUseCase interface {
@@ -22,6 +24,10 @@ type StudentSignUpUseCase interface {
 	GetInvitation(invitationID string) (*dto.InvitationResponse, error)
 	ListMentorInvitations(mentorID string, page, pageSize int) (*dto.InvitationListResponse, error)
 	ValidateInviteCode(code string) (*dto.ValidateInviteCodeResponse, error)
+
+	// Stripe checkout flow
+	CreateCheckoutSession(req *dto.CreateCheckoutSessionRequest) (*dto.CheckoutSessionResponse, error)
+	ActivateFromCheckout(req *dto.ActivateFromCheckoutRequest) error
 
 	// Student signup operations
 	InitiateStudentSignUp(req *dto.StudentSignUpRequest) (*dto.StudentSignUpResponse, error)
@@ -39,6 +45,9 @@ type studentSignUpUseCase struct {
 	paymentRepo       repositories.PaymentRepository
 	studentAccessRepo repositories.StudentAccessRepository
 	supabaseAuth      *auth.SupabaseAuthService
+	supabaseAdmin     *auth.SupabaseAdminClient
+	stripeSecretKey   string
+	frontendBaseURL   string
 }
 
 func NewStudentSignUpUseCase(
@@ -48,6 +57,9 @@ func NewStudentSignUpUseCase(
 	paymentRepo repositories.PaymentRepository,
 	studentAccessRepo repositories.StudentAccessRepository,
 	supabaseAuth *auth.SupabaseAuthService,
+	supabaseAdmin *auth.SupabaseAdminClient,
+	stripeSecretKey string,
+	frontendBaseURL string,
 ) StudentSignUpUseCase {
 	return &studentSignUpUseCase{
 		invitationRepo:    invitationRepo,
@@ -56,6 +68,9 @@ func NewStudentSignUpUseCase(
 		paymentRepo:       paymentRepo,
 		studentAccessRepo: studentAccessRepo,
 		supabaseAuth:      supabaseAuth,
+		supabaseAdmin:     supabaseAdmin,
+		stripeSecretKey:   stripeSecretKey,
+		frontendBaseURL:   frontendBaseURL,
 	}
 }
 
@@ -433,7 +448,176 @@ func generateUniqueInviteCode() (string, error) {
 func getBaseURL() string {
 	baseURL := os.Getenv("FRONTEND_BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:5173" // Default for development
+		baseURL = "http://localhost:5173"
 	}
 	return baseURL
+}
+
+// CreateCheckoutSession creates a Stripe Checkout Session (subscription mode) for the student invite flow.
+func (uc *studentSignUpUseCase) CreateCheckoutSession(req *dto.CreateCheckoutSessionRequest) (*dto.CheckoutSessionResponse, error) {
+	if uc.stripeSecretKey == "" {
+		return nil, errors.NewInternalServerError("Stripe not configured")
+	}
+
+	validation, err := uc.ValidateInviteCode(req.InviteCode)
+	if err != nil {
+		return nil, err
+	}
+	if !validation.IsValid {
+		return nil, errors.NewBadRequest(validation.Message)
+	}
+
+	product, err := uc.productRepo.GetByID(validation.ProductID)
+	if err != nil || product == nil {
+		return nil, errors.NewNotFound("Product not found")
+	}
+
+	currency := req.Currency
+	if currency == "" {
+		currency = "brl"
+	}
+
+	baseURL := uc.frontendBaseURL
+	if baseURL == "" {
+		baseURL = getBaseURL()
+	}
+
+	stripe.Key = uc.stripeSecretKey
+	params := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(currency),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String(product.Name),
+					},
+					UnitAmount: stripe.Int64(int64(req.AmountCents)),
+					Recurring: &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
+						Interval: stripe.String("month"),
+					},
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+		SuccessURL: stripe.String(baseURL + "/payment/success?session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:  stripe.String(baseURL + "/payment/cancel"),
+		Metadata: map[string]string{
+			"invite_code": req.InviteCode,
+			"mentor_id":   validation.MentorID,
+			"product_id":  validation.ProductID,
+		},
+	}
+
+	session, err := checkoutsession.New(params)
+	if err != nil {
+		return nil, errors.NewInternalServerError(fmt.Sprintf("failed to create checkout session: %v", err))
+	}
+
+	return &dto.CheckoutSessionResponse{
+		SessionID:  session.ID,
+		SessionURL: session.URL,
+	}, nil
+}
+
+// ActivateFromCheckout handles the checkout.session.completed webhook:
+// creates payment + split records, provisions the student's Supabase account if needed,
+// creates student_access and activates the invitation.
+func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromCheckoutRequest) error {
+	invitation, err := uc.invitationRepo.GetByInviteCode(req.InviteCode)
+	if err != nil {
+		return fmt.Errorf("failed to fetch invitation: %w", err)
+	}
+	if invitation == nil {
+		return fmt.Errorf("invitation not found for code %s", req.InviteCode)
+	}
+
+	mentor, err := uc.mentorRepo.GetByID(invitation.MentorID)
+	if err != nil || mentor == nil {
+		return fmt.Errorf("failed to fetch mentor: %w", err)
+	}
+
+	currency := req.Currency
+	if currency == "" {
+		currency = "brl"
+	}
+
+	// Use Stripe session ID as the payment intent reference for subscriptions.
+	payment := &models.Payment{
+		StudentEmail:          req.StudentEmail,
+		ProductID:             invitation.ProductID,
+		MentorID:              invitation.MentorID,
+		StripePaymentIntentID: req.StripeSessionID,
+		AmountCents:           req.AmountCents,
+		Currency:              currency,
+		Status:                "succeeded",
+	}
+	if req.StripeSubscriptionID != "" {
+		payment.StripeSubscriptionID = &req.StripeSubscriptionID
+	}
+	now := time.Now()
+	payment.SucceededAt = &now
+
+	if err := uc.paymentRepo.Create(payment); err != nil {
+		return fmt.Errorf("failed to create payment record: %w", err)
+	}
+
+	splitPct := mentor.RevenueShare
+	split := &models.PaymentSplit{
+		PaymentID:         payment.ID,
+		MentorID:          mentor.ID,
+		PlatformFeeCents:  int(float64(payment.AmountCents) * (1 - splitPct/100)),
+		MentorAmountCents: int(float64(payment.AmountCents) * splitPct / 100),
+		SplitPercentage:   splitPct,
+	}
+	if err := uc.paymentRepo.CreateSplit(split); err != nil {
+		return fmt.Errorf("failed to create payment split: %w", err)
+	}
+
+	// Provision student in Supabase Auth if not already registered.
+	existingAuth, _ := uc.invitationRepo.GetStudentAuthByEmail(req.StudentEmail)
+	if existingAuth == nil && uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+		tempPassword, _ := generateTempPassword()
+		authUser, err := uc.supabaseAdmin.CreateAuthUser(req.StudentEmail, tempPassword)
+		if err == nil {
+			studentAuth := &models.StudentAuth{
+				StudentEmail:   req.StudentEmail,
+				SupabaseUserID: authUser.ID,
+				InvitationID:   &invitation.ID,
+				MentorID:       invitation.MentorID,
+				ProductID:      invitation.ProductID,
+			}
+			_ = uc.invitationRepo.CreateStudentAuth(studentAuth)
+		}
+	}
+
+	// Grant access — idempotent: if a row already exists for this email+product, skip.
+	existingAccess, _ := uc.studentAccessRepo.GetByEmailAndProduct(req.StudentEmail, invitation.ProductID)
+	if existingAccess == nil {
+		access := &models.StudentAccess{
+			Email:        req.StudentEmail,
+			ProductID:    invitation.ProductID,
+			Active:       true,
+			InvitationID: &invitation.ID,
+		}
+		if err := uc.studentAccessRepo.Create(access); err != nil {
+			return fmt.Errorf("failed to create student access: %w", err)
+		}
+	}
+
+	paymentID := payment.ID
+	invitation.Status = "active"
+	invitation.PaymentID = &paymentID
+	invitation.ActivatedAt = &now
+	_ = uc.invitationRepo.Update(invitation)
+
+	return nil
+}
+
+func generateTempPassword() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

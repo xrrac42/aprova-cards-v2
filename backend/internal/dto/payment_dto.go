@@ -88,3 +88,26 @@ type RefundPaymentRequest struct {
 	PaymentID string `json:"payment_id" binding:"required"`
 	Reason    string `json:"reason" binding:"omitempty"`
 }
+
+// CreateCheckoutSessionRequest creates a Stripe Checkout Session for the student invite flow
+type CreateCheckoutSessionRequest struct {
+	InviteCode  string `json:"invite_code" binding:"required"`
+	AmountCents int    `json:"amount_cents" binding:"required,gt=0"`
+	Currency    string `json:"currency" binding:"omitempty,len=3"`
+}
+
+// CheckoutSessionResponse returns the Stripe Checkout Session URL
+type CheckoutSessionResponse struct {
+	SessionID  string `json:"session_id"`
+	SessionURL string `json:"session_url"`
+}
+
+// ActivateFromCheckoutRequest carries checkout.session.completed data for student activation
+type ActivateFromCheckoutRequest struct {
+	InviteCode           string
+	StudentEmail         string
+	AmountCents          int
+	Currency             string
+	StripeSessionID      string
+	StripeSubscriptionID string
+}

@@ -10,7 +10,7 @@ import type { Session } from '@/types';
 
 const SESSION_KEY = 'flashcard_session';
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
-const ENABLE_EDGE_ADMIN_CHECK = import.meta.env.VITE_ENABLE_EDGE_ADMIN_CHECK === 'true';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
 export function getSession(): Session | null {
   const raw = localStorage.getItem(SESSION_KEY);
@@ -115,26 +115,32 @@ export async function login(
   if (authError) {
     onProgress?.('Verificando acesso alternativo...');
 
-    // 2. Verificar se é admin via edge function
-    if (ENABLE_EDGE_ADMIN_CHECK) {
-      try {
-        const { data: adminCheck } = await supabase.functions.invoke('check-admin', {
-          body: { email: normalizedEmail, password: trimmedPassword },
-        });
+    // 2. Verificar se é admin via backend Go
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/auth/admin-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: trimmedPassword,
+        }),
+      });
 
-        if (adminCheck?.isAdmin) {
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.data?.token) {
           const session: Session = { email: normalizedEmail, role: 'admin' };
           setSession(session);
           return {
             session,
             redirect: '/admin',
-            accessToken: adminCheck?.token || '',
+            accessToken: data.data.token,
             refreshToken: '',
           };
         }
-      } catch {
-        // Ignore missing edge function in environments where admin is not validated via Supabase Functions.
       }
+    } catch {
+      // Ignore backend unreachable error
     }
 
     throw new Error('Email ou senha inválidos.');

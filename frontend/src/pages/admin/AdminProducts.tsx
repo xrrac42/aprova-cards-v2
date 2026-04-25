@@ -473,32 +473,7 @@ const AdminProducts: React.FC = () => {
             <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
           ) : (
             <>
-              {/* Banner: products without kiwify_product_id */}
-              {(() => {
-                const missing = products.filter(p => !(p as any).kiwify_product_id);
-                if (missing.length === 0) return null;
-                return (
-                  <div className="mb-4 rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 flex items-start gap-3">
-                    <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {missing.length} produto{missing.length > 1 ? 's' : ''} sem ID da Kiwify configurado.
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        O webhook não funcionará para esses produtos até que o ID seja preenchido.
-                      </p>
-                      <button
-                        onClick={() => navigate(`/admin/produtos/editar/${missing[0].id}`)}
-                        className="mt-2 text-xs font-medium text-primary hover:underline"
-                      >
-                        Configurar agora →
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div className="space-y-3">
+<div className="space-y-3">
               {filtered.map(p => (
                 <div key={p.id} className="rounded-2xl border border-border bg-card p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
@@ -514,13 +489,6 @@ const AdminProducts: React.FC = () => {
                       <p className="text-sm text-muted-foreground mt-0.5">
                         <span className="font-mono">{p.access_code}</span> · {(p.mentors as any)?.name}
                       </p>
-                      {(p as any).kiwify_product_id ? (
-                        <p className="font-mono text-xs text-muted-foreground mt-0.5">Kiwify: {(p as any).kiwify_product_id}</p>
-                      ) : (
-                        <span className="mt-1 inline-block rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
-                          ID Kiwify não configurado
-                        </span>
-                      )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button

@@ -127,39 +127,39 @@ export type Database = {
           created_at: string
           email: string | null
           id: string
-          kiwify_webhook_token: string | null
           logo_url: string | null
-          mentor_password: string
           name: string
           primary_color: string
+          revenue_share: number
           secondary_color: string
           slug: string
+          stripe_account_id: string | null
         }
         Insert: {
           accent_color?: string | null
           created_at?: string
           email?: string | null
           id?: string
-          kiwify_webhook_token?: string | null
           logo_url?: string | null
-          mentor_password: string
           name: string
           primary_color?: string
+          revenue_share?: number
           secondary_color?: string
           slug: string
+          stripe_account_id?: string | null
         }
         Update: {
           accent_color?: string | null
           created_at?: string
           email?: string | null
           id?: string
-          kiwify_webhook_token?: string | null
           logo_url?: string | null
-          mentor_password?: string
           name?: string
           primary_color?: string
+          revenue_share?: number
           secondary_color?: string
           slug?: string
+          stripe_account_id?: string | null
         }
         Relationships: []
       }

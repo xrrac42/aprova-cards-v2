@@ -15,7 +15,7 @@ const AdminMentors: React.FC = () => {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState('');
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b' });
+  const [form, setForm] = useState({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b', stripe_account_id: '' });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
@@ -58,14 +58,14 @@ const AdminMentors: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b' });
+    setForm({ name: '', email: '', slug: '', password: '', primary_color: '#6c63ff', secondary_color: '#43e97b', stripe_account_id: '' });
     setLogoFile(null);
     setShowModal(true);
   };
 
   const openEdit = (m: any) => {
     setEditing(m);
-    setForm({ name: m.name, email: m.email || '', slug: m.slug, password: '', primary_color: m.primary_color, secondary_color: m.secondary_color });
+    setForm({ name: m.name, email: m.email || '', slug: m.slug, password: '', primary_color: m.primary_color, secondary_color: m.secondary_color, stripe_account_id: m.stripe_account_id || '' });
     setLogoFile(null);
     setShowModal(true);
   };
@@ -78,14 +78,13 @@ const AdminMentors: React.FC = () => {
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
         const path = `${form.slug || 'mentor'}-${Date.now()}.${ext}`;
-        const { error } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
-        if (!error) {
-          const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
-          logoUrl = urlData.publicUrl;
-        }
+        const { error: uploadError } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
+        if (uploadError) throw new Error(`Falha ao enviar a logo: ${uploadError.message}`);
+        const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
+        logoUrl = urlData.publicUrl;
       }
 
-      const payload = { name: form.name, email: form.email || null, slug: form.slug, primary_color: form.primary_color, secondary_color: form.secondary_color, logo_url: logoUrl };
+      const payload = { name: form.name, email: form.email || null, slug: form.slug, primary_color: form.primary_color, secondary_color: form.secondary_color, logo_url: logoUrl, stripe_account_id: form.stripe_account_id || null };
       if (editing) {
         await supabase.from('mentors').update(payload).eq('id', editing.id);
       } else {
@@ -110,6 +109,7 @@ const AdminMentors: React.FC = () => {
             primary_color: form.primary_color,
             secondary_color: form.secondary_color,
             logo_url: logoUrl,
+            stripe_account_id: form.stripe_account_id || null,
           }),
         });
 
@@ -281,6 +281,16 @@ const AdminMentors: React.FC = () => {
               </div>
             </div>
             
+            {/* Stripe Account */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">ID da conta Stripe (recebimentos)</label>
+              <input type="text" value={form.stripe_account_id}
+                onChange={e => setForm(f => ({ ...f, stripe_account_id: e.target.value.trim() }))}
+                placeholder="acct_xxxxxxxxxxxxxxxx"
+                className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors" />
+              <p className="mt-1 text-[11px] text-muted-foreground">Stripe Connect account ID do mentor — usado para repasse automático 50/50.</p>
+            </div>
+
             {/* Logo */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Upload de logo</label>

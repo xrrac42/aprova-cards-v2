@@ -5,8 +5,13 @@ import (
 	"fmt"
 
 	"github.com/supabase-community/supabase-go"
-	"github.com/supabase-community/supabase-go/storage"
 )
+
+type adminUserCreateRequest struct {
+	Email        string                 `json:"email"`
+	Password     string                 `json:"password"`
+	UserMetadata map[string]interface{} `json:"user_metadata,omitempty"`
+}
 
 type SupabaseAuthService struct {
 	client *supabase.Client
@@ -60,53 +65,24 @@ func (s *SupabaseAuthService) CreateUser(
 
 	// Use the admin API to create user
 	// Note: This requires the Supabase service key to be set in the client
-	req := storage.AuthUserCreateRequest{
+	req := adminUserCreateRequest{
 		Email:    input.Email,
 		Password: input.Password,
 	}
 
+	meta := make(map[string]interface{})
 	if input.FullName != "" {
-		req.UserMetadata = map[string]interface{}{
-			"full_name": input.FullName,
-		}
+		meta["full_name"] = input.FullName
+	}
+	for k, v := range input.Metadata {
+		meta[k] = v
+	}
+	if len(meta) > 0 {
+		req.UserMetadata = meta
 	}
 
-	// Merge provided metadata with default metadata
-	if input.Metadata != nil {
-		if req.UserMetadata == nil {
-			req.UserMetadata = input.Metadata
-		} else {
-			for k, v := range input.Metadata {
-				req.UserMetadata.(map[string]interface{})[k] = v
-			}
-		}
-	}
-
-	// Create the auth user using the admin client
-	// The actual implementation depends on the Supabase Go SDK version
-	// For now, we'll use a placeholder that should be adjusted based on SDK capabilities
-	user, err := s.createAuthUserAdmin(ctx, &req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create auth user: %w", err)
-	}
-
-	return &AuthUserResponse{
-		ID:    user.ID,
-		Email: user.Email,
-	}, nil
-}
-
-// createAuthUserAdmin is a wrapper for the admin API
-// This is a placeholder implementation that needs to be adjusted
-// based on the actual Supabase Go SDK capabilities
-func (s *SupabaseAuthService) createAuthUserAdmin(
-	ctx context.Context,
-	req *storage.AuthUserCreateRequest,
-) (interface{}, error) {
-	// TODO: Implement using Supabase Admin API
-	// This would typically call: s.client.Auth.Admin.CreateUser(ctx, req)
-	// The actual method name depends on the SDK version
-	return nil, fmt.Errorf("not yet implemented - requires Supabase Admin API integration")
+	_ = req // supabase-go SDK does not expose admin user creation; use SupabaseAdminClient instead
+	return nil, fmt.Errorf("not implemented: use SupabaseAdminClient.CreateAuthUser")
 }
 
 // GetUser retrieves a user by ID

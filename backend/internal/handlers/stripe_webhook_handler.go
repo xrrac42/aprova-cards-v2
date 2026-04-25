@@ -81,6 +81,8 @@ func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 // processEvent processes the webhook event based on its type
 func (h *StripeWebhookHandler) processEvent(c *gin.Context, event stripe.Event) {
 	switch event.Type {
+	case "checkout.session.completed":
+		h.handleCheckoutSessionCompleted(c, event)
 	case "payment_intent.succeeded":
 		h.handlePaymentIntentSucceeded(c, event)
 	case "payment_intent.payment_failed":
@@ -92,11 +94,54 @@ func (h *StripeWebhookHandler) processEvent(c *gin.Context, event stripe.Event) 
 	case "customer.subscription.deleted":
 		h.handleSubscriptionDeleted(c, event)
 	default:
-		c.JSON(http.StatusOK, dto.APIResponse{
-			Success: true,
-			Message: "Webhook received but not processed",
-		})
+		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Webhook received but not processed"})
 	}
+}
+
+// handleCheckoutSessionCompleted activates student access after successful Stripe Checkout.
+func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c *gin.Context, event stripe.Event) {
+	var session stripe.CheckoutSession
+	if err := json.Unmarshal(event.Data.Raw, &session); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Failed to parse checkout session"})
+		return
+	}
+
+	inviteCode := session.Metadata["invite_code"]
+	if inviteCode == "" {
+		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "No invite_code in metadata"})
+		return
+	}
+
+	studentEmail := ""
+	if session.CustomerDetails != nil {
+		studentEmail = session.CustomerDetails.Email
+	}
+	if studentEmail == "" {
+		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "No customer email in session"})
+		return
+	}
+
+	subscriptionID := ""
+	if session.Subscription != nil {
+		subscriptionID = session.Subscription.ID
+	}
+
+	req := &dto.ActivateFromCheckoutRequest{
+		InviteCode:           inviteCode,
+		StudentEmail:         studentEmail,
+		AmountCents:          int(session.AmountTotal),
+		Currency:             string(session.Currency),
+		StripeSessionID:      session.ID,
+		StripeSubscriptionID: subscriptionID,
+	}
+
+	if err := h.studentSignUpUsecase.ActivateFromCheckout(req); err != nil {
+		// Return 200 so Stripe does not retry — error is surfaced in the response body.
+		c.JSON(http.StatusOK, dto.APIResponse{Success: false, Message: "Activation failed: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Student access activated"})
 }
 
 // handlePaymentIntentSucceeded handles successful payment intents
@@ -135,7 +180,7 @@ func (h *StripeWebhookHandler) handlePaymentIntentSucceeded(c *gin.Context, even
 	// Handle the webhook event through the payment usecase
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
-		event.Type,
+		string(event.Type),
 		map[string]interface{}{
 			"payment_intent": paymentIntent,
 			"student_email":  studentEmail,
@@ -186,7 +231,7 @@ func (h *StripeWebhookHandler) handlePaymentIntentFailed(c *gin.Context, event s
 
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
-		event.Type,
+		string(event.Type),
 		map[string]interface{}{
 			"payment_intent": paymentIntent,
 		},
@@ -214,7 +259,7 @@ func (h *StripeWebhookHandler) handleChargeRefunded(c *gin.Context, event stripe
 
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
-		event.Type,
+		string(event.Type),
 		map[string]interface{}{
 			"charge": charge,
 		},
@@ -242,7 +287,7 @@ func (h *StripeWebhookHandler) handleSubscriptionUpdated(c *gin.Context, event s
 
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
-		event.Type,
+		string(event.Type),
 		map[string]interface{}{
 			"subscription": subscription,
 		},
@@ -270,7 +315,7 @@ func (h *StripeWebhookHandler) handleSubscriptionDeleted(c *gin.Context, event s
 
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
-		event.Type,
+		string(event.Type),
 		map[string]interface{}{
 			"subscription": subscription,
 		},

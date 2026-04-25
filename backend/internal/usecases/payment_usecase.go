@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/approva-cards/back-aprova-cards/config"
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"github.com/approva-cards/back-aprova-cards/internal/repositories"
@@ -36,17 +37,20 @@ type paymentUseCase struct {
 	paymentRepo repositories.PaymentRepository
 	mentorRepo  repositories.MentorRepository
 	productRepo repositories.ProductRepository
+	stripeCfg   config.StripeConfig
 }
 
 func NewPaymentUseCase(
 	paymentRepo repositories.PaymentRepository,
 	mentorRepo repositories.MentorRepository,
 	productRepo repositories.ProductRepository,
+	stripeCfg config.StripeConfig,
 ) PaymentUseCase {
 	return &paymentUseCase{
 		paymentRepo: paymentRepo,
 		mentorRepo:  mentorRepo,
 		productRepo: productRepo,
+		stripeCfg:   stripeCfg,
 	}
 }
 
@@ -72,7 +76,7 @@ func (uc *paymentUseCase) CreatePaymentIntent(req *dto.CreatePaymentIntentReques
 	}
 
 	// Create Stripe payment intent
-	stripe.Key = getStripeKey() // Should be from environment
+	stripe.Key = uc.stripeCfg.SecretKey
 	params := &stripe.PaymentIntentParams{
 		Amount:      stripe.Int64(int64(req.AmountCents)),
 		Currency:    stripe.String(req.Currency),
@@ -151,13 +155,7 @@ func (uc *paymentUseCase) ConfirmPayment(req *dto.ConfirmPaymentRequest) (*dto.P
 		return nil, errors.NewNotFound("Payment not found")
 	}
 
-	// Confirm the payment intent with Stripe
-	stripe.Key = getStripeKey()
-	params := &stripe.PaymentIntentConfirmParams{
-		PaymentMethod: stripe.String(req.PaymentMethodID),
-	}
-
-	// For PIX, we need to add some additional handling
+	stripe.Key = uc.stripeCfg.SecretKey
 	form := &stripe.PaymentIntentConfirmParams{
 		PaymentMethod: stripe.String(req.PaymentMethodID),
 	}
@@ -169,7 +167,6 @@ func (uc *paymentUseCase) ConfirmPayment(req *dto.ConfirmPaymentRequest) (*dto.P
 		return nil, errors.NewBadRequest(fmt.Sprintf("Payment confirmation failed: %v", err))
 	}
 
-	// Update payment status based on Stripe intent status
 	payment.Status = mapStripeStatus(intent.Status)
 	now := time.Now()
 	payment.UpdatedAt = now
@@ -177,8 +174,11 @@ func (uc *paymentUseCase) ConfirmPayment(req *dto.ConfirmPaymentRequest) (*dto.P
 		payment.SucceededAt = &now
 		payment.Status = "succeeded"
 
-		// Create payment split record
-		splitPercentage := 70.0
+		mentor, err := uc.mentorRepo.GetByID(payment.MentorID)
+		if err != nil {
+			return nil, errors.NewInternalServerError("Failed to fetch mentor for split")
+		}
+		splitPercentage := mentor.RevenueShare
 		split := &models.PaymentSplit{
 			PaymentID:         payment.ID,
 			MentorID:          payment.MentorID,
@@ -288,16 +288,7 @@ func (uc *paymentUseCase) RefundPayment(req *dto.RefundPaymentRequest) (*dto.Pay
 		return nil, errors.NewBadRequest("Only succeeded payments can be refunded")
 	}
 
-	stripe.Key = getStripeKey()
-	params := &stripe.RefundParams{
-		PaymentIntent: stripe.String(payment.StripePaymentIntentID),
-		Reason:        stripe.String("requested_by_customer"),
-	}
-
-	if req.Reason != "" {
-		params.Reason = stripe.String(req.Reason)
-	}
-
+	stripe.Key = uc.stripeCfg.SecretKey
 	_, err = paymentintent.Get(payment.StripePaymentIntentID, nil)
 	if err != nil {
 		return nil, errors.NewInternalServerError("Failed to get Stripe payment intent")
@@ -434,10 +425,4 @@ func formatTime(t *time.Time) *string {
 	}
 	s := t.Format(time.RFC3339)
 	return &s
-}
-
-func getStripeKey() string {
-	// This should be loaded from environment
-	// For now, return a placeholder
-	return "sk_test_" // Should be: os.Getenv("STRIPE_SECRET_KEY")
 }

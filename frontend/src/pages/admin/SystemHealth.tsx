@@ -159,8 +159,10 @@ const SystemHealth: React.FC = () => {
   const runHealthCheck = async () => {
     setChecking(true);
     try {
-      const { data } = await supabase.functions.invoke('system-health-check');
-      if (data?.metrics) setMetrics(data.metrics);
+      const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+      const resp = await fetch(`${backendURL}/api/v1/admin/health-check`);
+      const json = await resp.json();
+      if (json?.data?.metrics) setMetrics(json.data.metrics);
       await loadIncidents();
     } catch (err) {
       console.error('Erro ao verificar saúde:', err);

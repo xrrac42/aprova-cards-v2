@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession, clearSession } from '@/lib/auth';
 import { applyMentorTheme } from '@/lib/theme';
-import { Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut, Copy, Check, Star, RefreshCw, Link2, Share2 } from 'lucide-react';
+import { Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut, Copy, Check, Star, RefreshCw, Link2, Share2, UserPlus, Loader2 } from 'lucide-react';
 
 interface ProductStat {
   id: string;
@@ -24,6 +24,9 @@ const MentorDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedLoginUrl, setCopiedLoginUrl] = useState(false);
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+  const [inviteGenerating, setInviteGenerating] = useState<Record<string, boolean>>({});
+  const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
 
   const baseUrl = import.meta.env.PROD ? 'https://aprovacards.lovable.app' : window.location.origin;
 
@@ -41,6 +44,51 @@ const MentorDashboard: React.FC = () => {
       try { await navigator.share({ title: `Login — ${mentor.name}`, url }); } catch {}
     } else {
       await copyLoginLink();
+    }
+  };
+
+  const generateInviteLink = async (productId: string, productName: string) => {
+    if (inviteLinks[productId]) return; // already generated, just copy
+    setInviteGenerating(prev => ({ ...prev, [productId]: true }));
+    try {
+      const code = crypto.randomUUID().replace(/-/g, '');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+
+      const { error } = await supabase.from('student_invitations').insert({
+        mentor_id: session!.mentor_id,
+        product_id: productId,
+        invite_code: code,
+        status: 'pending',
+        expires_at: expiresAt.toISOString(),
+      });
+
+      if (error) throw error;
+
+      const link = `${baseUrl}/cadastro?code=${code}`;
+      setInviteLinks(prev => ({ ...prev, [productId]: link }));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setInviteGenerating(prev => ({ ...prev, [productId]: false }));
+    }
+  };
+
+  const copyInviteLink = async (productId: string) => {
+    const link = inviteLinks[productId];
+    if (!link) return;
+    await navigator.clipboard.writeText(link);
+    setCopiedInvite(productId);
+    setTimeout(() => setCopiedInvite(null), 2000);
+  };
+
+  const shareInviteLink = async (productId: string, productName: string) => {
+    const link = inviteLinks[productId];
+    if (!link) return;
+    if (navigator.share) {
+      try { await navigator.share({ title: `Acesso — ${productName}`, text: 'Use esse link para se cadastrar e começar seus estudos.', url: link }); } catch {}
+    } else {
+      await copyInviteLink(productId);
     }
   };
 
@@ -201,7 +249,7 @@ const MentorDashboard: React.FC = () => {
             </div>
           ) : (
             productStats.map((p) => (
-              <div key={p.id} className="rounded-2xl border border-border bg-card p-4">
+              <div key={p.id} className="rounded-2xl border border-border bg-card p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-display font-semibold text-foreground">{p.name}</h3>
@@ -213,6 +261,37 @@ const MentorDashboard: React.FC = () => {
                     {p.active ? 'Ativo' : 'Inativo'}
                   </span>
                 </div>
+
+                {/* Invite link */}
+                {inviteLinks[p.id] ? (
+                  <div className="flex items-center gap-2 pt-1">
+                    <code className="flex-1 truncate rounded-xl bg-surface border border-border px-3 py-2 text-xs font-mono text-muted-foreground">
+                      {inviteLinks[p.id]}
+                    </code>
+                    <button
+                      onClick={() => copyInviteLink(p.id)}
+                      className="shrink-0 rounded-xl border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover flex items-center gap-1"
+                    >
+                      {copiedInvite === p.id ? <><Check className="h-3 w-3" /> Copiado!</> : <><Copy className="h-3 w-3" /> Copiar</>}
+                    </button>
+                    <button
+                      onClick={() => shareInviteLink(p.id, p.name)}
+                      className="shrink-0 rounded-xl border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover flex items-center gap-1"
+                    >
+                      <Share2 className="h-3 w-3" /> Compartilhar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => generateInviteLink(p.id, p.name)}
+                    disabled={inviteGenerating[p.id]}
+                    className="flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  >
+                    {inviteGenerating[p.id]
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Gerando...</>
+                      : <><UserPlus className="h-4 w-4" /> Convidar aluno</>}
+                  </button>
+                )}
               </div>
             ))
           )}

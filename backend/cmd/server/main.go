@@ -92,10 +92,56 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	}
 	api.POST("/admin/mentors/provision", handlers.NewMentorHandler(usecases.NewMentorUseCase(mentorRepo), adminMentorUC, supabaseAdminClient).CreateProvisioned)
 
+	productRepo := repositories.NewProductRepository(db)
+	discRepoForProducts := repositories.NewDisciplineRepository(db)
+	productUC := usecases.NewProductUseCase(productRepo, discRepoForProducts)
+	productHandler := handlers.NewProductHandler(productUC, db, supabaseAdminClient)
+	api.POST("/admin/products", productHandler.CreateByAdmin)
+	api.PUT("/admin/products/:id", productHandler.UpdateByAdmin)
+	api.GET("/admin/products/:id", productHandler.GetByIDByAdmin)
+
+	// ---- Admin Disciplines (public, no JWT) ----
+	discRepoAdmin := repositories.NewDisciplineRepository(db)
+	discUCAdmin := usecases.NewDisciplineUseCase(discRepoAdmin)
+	discHandlerAdmin := handlers.NewDisciplineHandler(discUCAdmin)
+	api.POST("/admin/products/:id/disciplines", discHandlerAdmin.Create)
+	api.GET("/admin/products/:id/disciplines", discHandlerAdmin.GetByProductID)
+	api.PUT("/admin/disciplines/:id", discHandlerAdmin.Update)
+	api.DELETE("/admin/disciplines/:id", discHandlerAdmin.Delete)
+	api.POST("/admin/disciplines/:id/reorder", discHandlerAdmin.Reorder)
+
+	// ---- Admin AI/Diagnostics (public with rate limit) ----
+	cardAnalysisHandler := handlers.NewCardAnalysisHandler(cfg.LovableAPIKey)
+	api.POST("/admin/cards/analyze", cardAnalysisHandler.AnalyzeCards)
+
+	healthCheckHandler := handlers.NewHealthCheckHandler(db)
+	api.GET("/admin/health-check", healthCheckHandler.Check)
+
 	// ---- Feedback (public for students via X-Student-Email header) ----
 	feedbackRepo := repositories.NewFeedbackRepository(db)
 	feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo)
 	api.POST("/feedbacks", feedbackHandler.Create)
+
+	// ---- Student invite + checkout (public) ----
+	invitationRepo := repositories.NewStudentInvitationRepository(db)
+	productRepo0 := repositories.NewProductRepository(db)
+	paymentRepo0 := repositories.NewPaymentRepository(db)
+	studentAccessRepo0 := repositories.NewStudentAccessRepository(db)
+	studentSignUpUC := usecases.NewStudentSignUpUseCase(
+		invitationRepo, mentorRepo, productRepo0, paymentRepo0, studentAccessRepo0,
+		nil, supabaseAdminClient,
+		cfg.Stripe.SecretKey, cfg.FrontendURL,
+	)
+	studentSignUpHandler := handlers.NewStudentSignUpHandler(studentSignUpUC)
+
+	api.POST("/invite/checkout", studentSignUpHandler.CreateCheckoutSession)
+	api.POST("/invite/validate", studentSignUpHandler.ValidateInviteCode)
+	api.POST("/auth/signup/initiate", studentSignUpHandler.InitiateStudentSignUp)
+
+	// ---- Stripe webhook (public, no JWT) ----
+	paymentUC := usecases.NewPaymentUseCase(paymentRepo0, mentorRepo, productRepo0, cfg.Stripe)
+	stripeWebhookHandler := handlers.NewStripeWebhookHandler(paymentUC, studentSignUpUC)
+	api.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhookEvent)
 
 	// ---- Protected routes (JWT required) ----
 	protected := api.Group("")
@@ -115,9 +161,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		}
 
 		// -- Products (admin/mentor) --
-		productRepo := repositories.NewProductRepository(db)
-		productUC := usecases.NewProductUseCase(productRepo)
-		productHandler := handlers.NewProductHandler(productUC)
+		productHandler := handlers.NewProductHandler(productUC, db, supabaseAdminClient)
 		products := protected.Group("/products")
 		{
 			products.POST("", productHandler.Create)
@@ -176,6 +220,14 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		studentRepo2 := repositories.NewStudentAccessRepository(db)
 		studentHandler2 := handlers.NewStudentHandler(studentRepo2)
 		protected.PATCH("/students/:email/access", studentHandler2.UpdateAccess)
+
+		// -- Invitations (mentor generates invite links) --
+		invitations := protected.Group("/invitations")
+		{
+			invitations.POST("", studentSignUpHandler.GenerateInvitation)
+			invitations.GET("", studentSignUpHandler.ListInvitations)
+			invitations.GET("/:id", studentSignUpHandler.GetInvitation)
+		}
 	}
 
 	fmt.Println("✅ Routes registered successfully")

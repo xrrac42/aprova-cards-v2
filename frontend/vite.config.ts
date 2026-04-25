@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 export default defineConfig(({ mode }) => ({
+  // Monorepo: load .env from repository root
+  envDir: path.resolve(__dirname, ".."),
   build: {
     outDir: "dist",
     sourcemap: mode !== "production",

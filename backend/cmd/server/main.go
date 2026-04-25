@@ -8,6 +8,7 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/handlers"
 	"github.com/approva-cards/back-aprova-cards/internal/repositories"
 	"github.com/approva-cards/back-aprova-cards/internal/usecases"
+	appauth "github.com/approva-cards/back-aprova-cards/pkg/auth"
 	"github.com/approva-cards/back-aprova-cards/pkg/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
@@ -66,6 +67,12 @@ func connectDatabase(cfg *config.Config) *gorm.DB {
 
 func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api := engine.Group("/api/v1")
+	supabaseAdminClient := appauth.NewSupabaseAdminClient(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey)
+	if supabaseAdminClient.IsConfigured() {
+		fmt.Println("✅ Mentor provisioning: Supabase Admin configured")
+	} else {
+		fmt.Printf("⚠️ Mentor provisioning disabled: %s\n", supabaseAdminClient.ConfigDiagnostic())
+	}
 
 	// ---- Health (public) ----
 	healthHandler := handlers.NewHealthHandler(db)
@@ -76,12 +83,14 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	mentorRepo := repositories.NewMentorRepository(db)
 	authUC := usecases.NewAuthUseCase(mentorRepo, cfg.Admin.Email, cfg.Admin.Password)
 	authHandler := handlers.NewAuthHandler(authUC, cfg.JWT.Secret, cfg.JWT.Expiration)
+	adminMentorUC := usecases.NewAdminMentorUseCase(db, supabaseAdminClient)
 
 	authGroup := api.Group("/auth")
 	authGroup.Use(middleware.RateLimitByIP(authLimiter))
 	{
 		authGroup.POST("/admin-login", authHandler.AdminLogin)
 	}
+	api.POST("/admin/mentors/provision", handlers.NewMentorHandler(usecases.NewMentorUseCase(mentorRepo), adminMentorUC, supabaseAdminClient).CreateProvisioned)
 
 	// ---- Feedback (public for students via X-Student-Email header) ----
 	feedbackRepo := repositories.NewFeedbackRepository(db)
@@ -94,7 +103,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	{
 		// -- Mentors (admin only) --
 		mentorUC := usecases.NewMentorUseCase(mentorRepo)
-		mentorHandler := handlers.NewMentorHandler(mentorUC)
+		mentorHandler := handlers.NewMentorHandler(mentorUC, adminMentorUC, supabaseAdminClient)
 		mentors := protected.Group("/mentors")
 		mentors.Use(middleware.AdminOnly())
 		{

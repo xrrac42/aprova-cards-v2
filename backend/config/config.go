@@ -15,6 +15,7 @@ type Config struct {
 	JWT       JWTConfig
 	CORS      CORSConfig
 	RateLimit RateLimitConfig
+	Supabase  SupabaseConfig
 }
 
 type ServerConfig struct {
@@ -44,6 +45,11 @@ type RateLimitConfig struct {
 	Enabled       bool
 	Requests      int
 	WindowSeconds int
+}
+
+type SupabaseConfig struct {
+	URL            string
+	ServiceRoleKey string
 }
 
 func Load() *Config {
@@ -77,6 +83,10 @@ func Load() *Config {
 			Enabled:       getEnvBool("RATE_LIMIT_ENABLED", true),
 			Requests:      getEnvInt("RATE_LIMIT_REQUESTS", 100),
 			WindowSeconds: getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 60),
+		},
+		Supabase: SupabaseConfig{
+			URL:            getEnvFirst([]string{"SUPABASE_URL", "VITE_SUPABASE_URL"}, ""),
+			ServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
 		},
 	}
 }
@@ -113,6 +123,15 @@ func getEnvBool(key string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return val == "true" || val == "1" || val == "yes"
+}
+
+func getEnvFirst(keys []string, defaultVal string) string {
+	for _, key := range keys {
+		if value, exists := os.LookupEnv(key); exists && value != "" {
+			return value
+		}
+	}
+	return defaultVal
 }
 
 type AdminConfig struct {

@@ -3,9 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
+import { PaymentCheckout } from "./components/PaymentCheckout";
 
 // Lazy load all non-login routes
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -42,6 +43,27 @@ const LazyFallback = () => (
   </div>
 );
 
+const CheckoutRoute = () => {
+  const [searchParams] = useSearchParams();
+
+  const studentEmail = searchParams.get("studentEmail");
+  const productId = searchParams.get("productId");
+  const amountCentsParam = searchParams.get("amountCents");
+  const amountCents = amountCentsParam ? Number(amountCentsParam) : NaN;
+
+  if (!studentEmail || !productId || !Number.isFinite(amountCents)) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <PaymentCheckout
+      studentEmail={studentEmail}
+      productId={productId}
+      amountCents={amountCents}
+    />
+  );
+};
+
 const App = () => (
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
@@ -70,6 +92,7 @@ const App = () => (
           <Route path="/admin/qualidade" element={<CardQuality />} />
           <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
           <Route path="/admin/personalizacao" element={<Customization />} />
+          <Route path="/checkout" element={<CheckoutRoute />} />
 
           {/* Student — StudySession gets its own Suspense to prevent remounts */}
           <Route path="/aluno" element={<StudentHome />} />

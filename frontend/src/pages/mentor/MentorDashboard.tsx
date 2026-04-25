@@ -3,7 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession, clearSession } from '@/lib/auth';
 import { applyMentorTheme } from '@/lib/theme';
-import { Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut, Copy, Check, Star, RefreshCw, Link2, Share2, UserPlus, Loader2 } from 'lucide-react';
+import { 
+  Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut, 
+  Copy, Check, Star, RefreshCw, Link2, Share2, UserPlus, Loader2 
+} from 'lucide-react';
 
 interface ProductStat {
   id: string;
@@ -15,7 +18,7 @@ interface ProductStat {
   weeklyAvgCards: number;
   topEngaged: string;
 }
-// ─── Main Component ───────────────────────────────────────────────────────────
+
 const MentorDashboard: React.FC = () => {
   const navigate = useNavigate();
   const session = getSession();
@@ -48,14 +51,15 @@ const MentorDashboard: React.FC = () => {
   };
 
   const generateInviteLink = async (productId: string, productName: string) => {
-    if (inviteLinks[productId]) return; // already generated, just copy
+    if (inviteLinks[productId]) return; 
     setInviteGenerating(prev => ({ ...prev, [productId]: true }));
+    
     try {
       const code = crypto.randomUUID().replace(/-/g, '');
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
 
-      const { error } = await supabase.from('student_invitations').insert({
+      const { error: dbError } = await supabase.from('student_invitations').insert({
         mentor_id: session!.mentor_id,
         product_id: productId,
         invite_code: code,
@@ -63,12 +67,13 @@ const MentorDashboard: React.FC = () => {
         expires_at: expiresAt.toISOString(),
       });
 
-      if (error) throw error;
+      if (dbError) throw dbError;
 
-      const link = `${baseUrl}/cadastro?code=${code}`;
+      // Link apontando para o checkout para teste do Stripe
+      const link = `${baseUrl}/checkout?code=${code}`;
       setInviteLinks(prev => ({ ...prev, [productId]: link }));
     } catch (e) {
-      console.error(e);
+      console.error('Erro ao gerar convite:', e);
     } finally {
       setInviteGenerating(prev => ({ ...prev, [productId]: false }));
     }
@@ -86,7 +91,7 @@ const MentorDashboard: React.FC = () => {
     const link = inviteLinks[productId];
     if (!link) return;
     if (navigator.share) {
-      try { await navigator.share({ title: `Acesso — ${productName}`, text: 'Use esse link para se cadastrar e começar seus estudos.', url: link }); } catch {}
+      try { await navigator.share({ title: `Acesso — ${productName}`, url: link }); } catch {}
     } else {
       await copyInviteLink(productId);
     }
@@ -106,31 +111,40 @@ const MentorDashboard: React.FC = () => {
       setError(null);
       const mentorId = session!.mentor_id!;
 
-      const [{ data: mentorData }, { data: statsData }] = await Promise.all([
+      // Buscamos mentor, produtos vinculados e estatísticas em paralelo
+      const [mentorRes, productsRes, statsRes] = await Promise.all([
         supabase.from('mentors').select('*').eq('id', mentorId).maybeSingle(),
+        supabase.from('products').select('*').eq('mentor_id', mentorId),
         supabase.rpc('get_mentor_stats', { p_mentor_id: mentorId }),
       ]);
 
-      if (mentorData) {
-        setMentor(mentorData);
-        applyMentorTheme(mentorData.primary_color, mentorData.secondary_color);
+      if (mentorRes.data) {
+        setMentor(mentorRes.data);
+        applyMentorTheme(mentorRes.data.primary_color, mentorRes.data.secondary_color);
       }
 
-      const pStats: ProductStat[] = (statsData || []).map((s: any) => ({
-        id: s.product_id,
-        name: s.product_name,
-        active: s.product_active,
-        totalStudents: Number(s.total_students),
-        cardsReviewed: Number(s.cards_reviewed),
-        studentsToday: Number(s.students_today),
-        weeklyAvgCards: Number(s.weekly_avg_cards_per_student),
-        topEngaged: s.top_engaged_email || '',
-      }));
+      // Mapeamos os produtos e mesclamos com os dados da RPC (se existirem)
+      const products = productsRes.data || [];
+      const stats = statsRes.data || [];
 
-      setProductStats(pStats);
+      const combinedStats: ProductStat[] = products.map(p => {
+        const s = stats.find((stat: any) => stat.product_id === p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          active: p.active,
+          totalStudents: Number(s?.total_students || 0),
+          cardsReviewed: Number(s?.cards_reviewed || 0),
+          studentsToday: Number(s?.students_today || 0),
+          weeklyAvgCards: Number(s?.weekly_avg_cards_per_student || 0),
+          topEngaged: s?.top_engaged_email || '',
+        };
+      });
+
+      setProductStats(combinedStats);
     } catch (err: any) {
-      setError('Erro ao carregar dados. Tente novamente.');
       console.error(err);
+      setError('Erro ao carregar dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -142,27 +156,15 @@ const MentorDashboard: React.FC = () => {
   };
 
   const totalActiveStudents = productStats.reduce((s, p) => s + p.totalStudents, 0);
-  const studentsToday = productStats.reduce((s, p) => s + p.studentsToday, 0);
-  const weeklyAvgCards = productStats.length > 0
+  const studentsTodayTotal = productStats.reduce((s, p) => s + p.studentsToday, 0);
+  const weeklyAvgCardsTotal = productStats.length > 0
     ? Math.round(productStats.reduce((s, p) => s + p.weeklyAvgCards, 0) / productStats.length)
     : 0;
-  const topEngaged = productStats.reduce((best, p) => p.topEngaged ? p.topEngaged : best, '');
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-        <p className="mb-4 text-center text-muted-foreground">{error}</p>
-        <button onClick={loadData} className="flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 font-display font-semibold text-primary-foreground hover:opacity-90">
-          <RefreshCw className="h-4 w-4" /> Tentar novamente
-        </button>
       </div>
     );
   }
@@ -185,19 +187,19 @@ const MentorDashboard: React.FC = () => {
               <p className="text-sm text-muted-foreground">Painel do Mentor</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="rounded-2xl bg-card p-2.5 text-muted-foreground hover:text-foreground transition-colors" title="Sair">
+          <button onClick={handleLogout} className="rounded-2xl bg-card p-2.5 text-muted-foreground hover:text-foreground transition-colors">
             <LogOut className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Login URL Card */}
+        {/* Login URL */}
         {mentor?.slug && (
           <div className="mb-8 rounded-2xl border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-3">
               <Link2 className="h-5 w-5 text-primary shrink-0" />
-              <h2 className="font-display font-semibold text-foreground">Seu link de login</h2>
+              <h2 className="font-display font-semibold text-foreground">Link de login dos alunos</h2>
             </div>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2">
               <code className="flex-1 truncate rounded-xl bg-surface border border-border px-4 py-2.5 text-xs font-mono text-muted-foreground">
                 {baseUrl}/login/{mentor.slug}
               </code>
@@ -207,49 +209,38 @@ const MentorDashboard: React.FC = () => {
               >
                 {copiedLoginUrl ? <><Check className="h-3.5 w-3.5" /> Copiado!</> : <><Copy className="h-3.5 w-3.5" /> Copiar</>}
               </button>
-              <button
-                onClick={shareLoginLink}
-                className="shrink-0 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover flex items-center gap-1.5"
-              >
-                <Share2 className="h-3.5 w-3.5" /> Compartilhar
-              </button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Envie esse link para seus alunos após a compra. Já vem personalizado com sua identidade visual.
-            </p>
           </div>
         )}
 
-
-        {/* Metrics */}
+        {/* Metrics Grid */}
         <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { label: 'Alunos ativos', value: totalActiveStudents, icon: Users, sub: 'com pelo menos 1 sessão' },
-            { label: 'Estudaram hoje', value: studentsToday, icon: TrendingUp, sub: 'sessões hoje' },
-            { label: 'Média semanal', value: weeklyAvgCards, icon: BookOpen, sub: 'cards/aluno (7 dias)' },
-            { label: 'Mais engajado', value: topEngaged ? topEngaged.split('@')[0] : '—', icon: Star, sub: 'no mês atual', isText: true },
-          ].map(({ label, value, icon: Icon, sub, isText }) => (
+            { label: 'Alunos ativos', value: totalActiveStudents, icon: Users },
+            { label: 'Estudaram hoje', value: studentsTodayTotal, icon: TrendingUp },
+            { label: 'Média semanal', value: weeklyAvgCardsTotal, icon: BookOpen },
+            { label: 'Mais engajado', value: productStats.find(p => p.topEngaged)?.topEngaged.split('@')[0] || '—', icon: Star, isText: true },
+          ].map(({ label, value, icon: Icon, isText }) => (
             <div key={label} className="rounded-2xl border border-border bg-card p-4">
               <Icon className="mb-2 h-5 w-5 text-muted-foreground" />
-              <p className={`font-display font-bold text-foreground ${isText ? 'text-sm leading-tight break-all line-clamp-2' : 'text-2xl'}`}>
+              <p className={`font-display font-bold text-foreground ${isText ? 'text-sm truncate' : 'text-2xl'}`}>
                 {value}
               </p>
               <p className="text-xs font-medium text-foreground">{label}</p>
-              <p className="text-xs text-muted-foreground">{sub}</p>
             </div>
           ))}
         </div>
 
-        {/* Products */}
+        {/* Products List */}
         <h2 className="mb-3 font-display text-lg font-semibold text-foreground">Seus Produtos</h2>
         <div className="mb-8 space-y-3">
           {productStats.length === 0 ? (
             <div className="rounded-2xl border border-border bg-card p-8 text-center">
-              <p className="text-muted-foreground">Nenhum produto vinculado</p>
+              <p className="text-muted-foreground">Nenhum produto encontrado.</p>
             </div>
           ) : (
             productStats.map((p) => (
-              <div key={p.id} className="rounded-2xl border border-border bg-card p-4 space-y-3">
+              <div key={p.id} className="rounded-2xl border border-border bg-card p-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-display font-semibold text-foreground">{p.name}</h3>
@@ -262,9 +253,8 @@ const MentorDashboard: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Invite link */}
                 {inviteLinks[p.id] ? (
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2">
                     <code className="flex-1 truncate rounded-xl bg-surface border border-border px-3 py-2 text-xs font-mono text-muted-foreground">
                       {inviteLinks[p.id]}
                     </code>
@@ -289,7 +279,7 @@ const MentorDashboard: React.FC = () => {
                   >
                     {inviteGenerating[p.id]
                       ? <><Loader2 className="h-4 w-4 animate-spin" /> Gerando...</>
-                      : <><UserPlus className="h-4 w-4" /> Convidar aluno</>}
+                      : <><UserPlus className="h-4 w-4" /> Gerar link de pagamento</>}
                   </button>
                 )}
               </div>
@@ -297,19 +287,19 @@ const MentorDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Navigation */}
+        {/* Bottom Nav */}
         <div className="grid grid-cols-3 gap-3">
-          <Link to="/mentor/alunos" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 sm:p-5 text-center transition-colors hover:bg-surface-hover active:scale-[0.97] touch-manipulation">
+          <Link to="/mentor/alunos" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 transition-colors hover:bg-surface-hover">
             <Users className="h-6 w-6 text-primary" />
-            <span className="text-xs sm:text-sm font-medium text-foreground">Alunos</span>
+            <span className="text-xs font-medium text-foreground">Alunos</span>
           </Link>
-          <Link to="/mentor/personalizacao" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 sm:p-5 text-center transition-colors hover:bg-surface-hover active:scale-[0.97] touch-manipulation">
+          <Link to="/mentor/personalizacao" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 transition-colors hover:bg-surface-hover">
             <Palette className="h-6 w-6 text-primary" />
-            <span className="text-xs sm:text-sm font-medium text-foreground">Visual</span>
+            <span className="text-xs font-medium text-foreground">Visual</span>
           </Link>
-          <Link to="/mentor/relatorios" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 sm:p-5 text-center transition-colors hover:bg-surface-hover active:scale-[0.97] touch-manipulation">
+          <Link to="/mentor/relatorios" className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 transition-colors hover:bg-surface-hover">
             <BarChart3 className="h-6 w-6 text-primary" />
-            <span className="text-xs sm:text-sm font-medium text-foreground">Relatórios</span>
+            <span className="text-xs font-medium text-foreground">Relatórios</span>
           </Link>
         </div>
       </div>

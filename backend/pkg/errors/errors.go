@@ -47,9 +47,25 @@ var (
 )
 
 func NewAppError(code, message string, status int) *AppError {
-	return &AppError{
-		Code:    code,
-		Message: message,
-		Status:  status,
-	}
+	return &AppError{Code: code, Message: message, Status: status}
+}
+
+func NewBadRequest(message string) *AppError {
+	return &AppError{Code: "BAD_REQUEST", Message: message, Status: 400}
+}
+
+func NewNotFound(message string) *AppError {
+	return &AppError{Code: "NOT_FOUND", Message: message, Status: 404}
+}
+
+func NewUnauthorized(message string) *AppError {
+	return &AppError{Code: "UNAUTHORIZED", Message: message, Status: 401}
+}
+
+func NewForbidden(message string) *AppError {
+	return &AppError{Code: "FORBIDDEN", Message: message, Status: 403}
+}
+
+func NewInternalServerError(message string) *AppError {
+	return &AppError{Code: "INTERNAL_SERVER_ERROR", Message: message, Status: 500}
 }

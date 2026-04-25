@@ -14,7 +14,6 @@ type Product struct {
 	AccessCode      string    `gorm:"uniqueIndex;not null" json:"access_code"`
 	Active          bool      `gorm:"not null;default:true" json:"active"`
 	CoverImageURL   *string   `json:"cover_image_url"`
-	KiwifyProductID *string   `json:"kiwify_product_id"`
 	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 	Mentor          *Mentor   `gorm:"foreignKey:MentorID" json:"mentor,omitempty"`
 }

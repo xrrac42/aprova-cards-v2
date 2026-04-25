@@ -9,13 +9,22 @@ import (
 )
 
 type Config struct {
-	Admin     AdminConfig
-	Server    ServerConfig
-	Database  DatabaseConfig
-	JWT       JWTConfig
-	CORS      CORSConfig
-	RateLimit RateLimitConfig
-	Supabase  SupabaseConfig
+	Admin         AdminConfig
+	Server        ServerConfig
+	Database      DatabaseConfig
+	JWT           JWTConfig
+	CORS          CORSConfig
+	RateLimit     RateLimitConfig
+	Supabase      SupabaseConfig
+	Stripe        StripeConfig
+	FrontendURL   string
+	LovableAPIKey string
+}
+
+type StripeConfig struct {
+	SecretKey      string
+	WebhookSecret  string
+	PublishableKey string
 }
 
 type ServerConfig struct {
@@ -88,6 +97,13 @@ func Load() *Config {
 			URL:            getEnvFirst([]string{"SUPABASE_URL", "VITE_SUPABASE_URL"}, ""),
 			ServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
 		},
+		Stripe: StripeConfig{
+			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),
+			WebhookSecret:  getEnv("STRIPE_WEBHOOK_SECRET", ""),
+			PublishableKey: getEnv("STRIPE_PUBLISHABLE_KEY", ""),
+		},
+		FrontendURL:   getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
+		LovableAPIKey: getEnv("LOVABLE_API_KEY", ""),
 	}
 }
 

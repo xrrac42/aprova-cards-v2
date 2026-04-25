@@ -68,13 +68,20 @@ func (uc *adminMentorUseCase) CreateMentorByAdmin(req *dto.CreateMentorRequest, 
 		return nil, fmt.Errorf("failed to create auth user: %w", err)
 	}
 
+	revenueShare := req.RevenueShare
+	if revenueShare == 0 {
+		revenueShare = 50.0
+	}
+
 	mentor := &models.Mentor{
-		Name:           strings.TrimSpace(req.Name),
-		Email:          normalizedEmail,
-		Slug:           normalizedSlug,
-		PrimaryColor:   req.PrimaryColor,
-		SecondaryColor: req.SecondaryColor,
-		LogoURL:        req.LogoURL,
+		Name:            strings.TrimSpace(req.Name),
+		Email:           normalizedEmail,
+		Slug:            normalizedSlug,
+		PrimaryColor:    req.PrimaryColor,
+		SecondaryColor:  req.SecondaryColor,
+		LogoURL:         req.LogoURL,
+		RevenueShare:    revenueShare,
+		StripeAccountID: req.StripeAccountID,
 	}
 	if mentor.PrimaryColor == "" {
 		mentor.PrimaryColor = "#6c63ff"
@@ -128,14 +135,16 @@ func (uc *adminMentorUseCase) CreateMentorByAdmin(req *dto.CreateMentorRequest, 
 	}
 
 	return &dto.MentorResponse{
-		ID:             mentor.ID,
-		Name:           mentor.Name,
-		Email:          mentor.Email,
-		Slug:           mentor.Slug,
-		LogoURL:        mentor.LogoURL,
-		PrimaryColor:   mentor.PrimaryColor,
-		SecondaryColor: mentor.SecondaryColor,
-		CreatedAt:      mentor.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:              mentor.ID,
+		Name:            mentor.Name,
+		Email:           mentor.Email,
+		Slug:            mentor.Slug,
+		LogoURL:         mentor.LogoURL,
+		PrimaryColor:    mentor.PrimaryColor,
+		SecondaryColor:  mentor.SecondaryColor,
+		RevenueShare:    mentor.RevenueShare,
+		StripeAccountID: mentor.StripeAccountID,
+		CreatedAt:       mentor.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
 

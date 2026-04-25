@@ -15,6 +15,7 @@ type Payment struct {
 	ProductID             string         `gorm:"not null;type:uuid" json:"product_id"`
 	MentorID              string         `gorm:"not null;type:uuid" json:"mentor_id"`
 	StripePaymentIntentID string         `gorm:"not null;uniqueIndex" json:"stripe_payment_intent_id"`
+	StripeSubscriptionID  *string        `gorm:"type:text;uniqueIndex" json:"stripe_subscription_id"`
 	AmountCents           int            `gorm:"not null" json:"amount_cents"` // Amount in cents (e.g., 999 = R$9.99)
 	Currency              string         `gorm:"not null;default:brl" json:"currency"`
 	Status                string         `gorm:"not null;default:pending;index" json:"status"` // pending, processing, succeeded, failed, refunded

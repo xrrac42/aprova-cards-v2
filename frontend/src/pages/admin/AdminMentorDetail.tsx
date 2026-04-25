@@ -44,23 +44,15 @@ const AdminMentorDetail: React.FC = () => {
     );
   }
 
-  const missingKiwifyProducts = products.filter(p => !p.kiwify_product_id);
   const hasEmail = !!mentor.email;
-  const hasToken = !!mentor.kiwify_webhook_token;
   const hasProducts = products.length > 0;
+  const hasStripeAccount = !!(mentor as any).stripe_account_id;
 
   const checks = [
     { label: 'Mentor cadastrado', ok: true, link: null },
     { label: 'E-mail configurado', ok: hasEmail, link: `/admin/mentores` },
     { label: `Produtos criados (${products.length})`, ok: hasProducts, link: `/admin/produtos` },
-    {
-      label: missingKiwifyProducts.length > 0
-        ? `ID Kiwify faltando em ${missingKiwifyProducts.length} produto${missingKiwifyProducts.length > 1 ? 's' : ''}`
-        : 'ID Kiwify configurado em todos os produtos',
-      ok: missingKiwifyProducts.length === 0,
-      link: missingKiwifyProducts.length > 0 ? `/admin/produtos/editar/${missingKiwifyProducts[0].id}` : null,
-    },
-    { label: 'Token do webhook configurado', ok: hasToken, link: `/admin/mentores` },
+    { label: 'Conta Stripe configurada (recebimentos)', ok: hasStripeAccount, link: `/admin/mentores` },
   ];
 
   return (
@@ -123,11 +115,6 @@ const AdminMentorDetail: React.FC = () => {
                     <h3 className="font-display font-semibold text-foreground">{p.name}</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       <span className="font-mono">{p.access_code}</span>
-                      {p.kiwify_product_id ? (
-                        <> · Kiwify: <span className="font-mono">{p.kiwify_product_id}</span></>
-                      ) : (
-                        <span className="ml-2 inline-block rounded-full bg-destructive/10 px-2 py-0.5 text-destructive font-medium">ID Kiwify não configurado</span>
-                      )}
                     </p>
                   </div>
                   <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${p.active ? 'bg-secondary/10 text-secondary' : 'bg-destructive/10 text-destructive'}`}>

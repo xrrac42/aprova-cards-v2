@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
-import { ArrowLeft, Loader2, AlertTriangle, X, ImageIcon, Zap } from 'lucide-react';
+import { ArrowLeft, Loader2, X, ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 const CreateProduct: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
   const session = getSession();
   const isEditing = !!id;
 
   const [name, setName] = useState('');
   const [accessCode, setAccessCode] = useState('');
-  const [kiwifyProductId, setKiwifyProductId] = useState('');
   const [mentorId, setMentorId] = useState('');
   const [active, setActive] = useState(true);
   const [mentors, setMentors] = useState<any[]>([]);
@@ -21,8 +21,6 @@ const CreateProduct: React.FC = () => {
   const [error, setError] = useState('');
   const [coverImageUrl, setCoverImageUrl] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [testingWebhook, setTestingWebhook] = useState(false);
-  const [webhookResult, setWebhookResult] = useState<{ success: boolean; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -31,59 +29,95 @@ const CreateProduct: React.FC = () => {
     if (isEditing) loadProduct();
   }, []);
 
+  useEffect(() => {
+    const created = (location.state as { created?: boolean } | null)?.created;
+    if (created) {
+      toast.success('Produto criado com sucesso! Primeira disciplina "Geral" criada automaticamente.');
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location.pathname, location.state, navigate]);
+
   const loadMentors = async () => {
     const { data } = await supabase.from('mentors').select('id, name');
     if (data) setMentors(data);
   };
 
   const loadProduct = async () => {
-    const { data } = await supabase.from('products').select('*').eq('id', id).maybeSingle();
-    if (data) {
-      setName(data.name);
-      setAccessCode(data.access_code);
-      setKiwifyProductId((data as any).kiwify_product_id || '');
-      setMentorId(data.mentor_id);
-      setActive(data.active);
-      setCoverImageUrl((data as any).cover_image_url || '');
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) {
+      setError('Sessao expirada. Faca login novamente.');
+      return;
     }
+
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
+    const response = await fetch(`${apiBase}/admin/products/${id}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success || !result?.data) {
+      setError(result?.error || 'Nao foi possivel carregar o produto.');
+      return;
+    }
+
+    const data = result.data;
+    setName(data.name);
+    setAccessCode(data.access_code);
+    setMentorId(data.mentor_id);
+    setActive(data.active);
+    setCoverImageUrl((data as any).cover_image_url || '');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    if (!kiwifyProductId.trim()) {
-      setError('O ID do Produto na Kiwify é obrigatório para ativar o produto.');
-      return;
-    }
-
     setLoading(true);
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('Sessao expirada. Faca login novamente.');
+      }
+
       const payload = {
         name,
         access_code: accessCode,
-        kiwify_product_id: kiwifyProductId.trim(),
         mentor_id: mentorId,
         active,
         cover_image_url: coverImageUrl || null,
       };
 
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
+
       if (isEditing) {
-        const { error: err } = await supabase.from('products').update(payload).eq('id', id);
-        if (err) {
-          console.error('Erro ao atualizar produto:', err.code, err.message, err.details);
-          throw err;
+        const response = await fetch(`${apiBase}/admin/products/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || 'Erro ao atualizar produto');
         }
         toast.success('Produto salvo com sucesso!');
       } else {
-        const { data, error: err } = await supabase.from('products').insert(payload).select('id').single();
-        if (err) {
-          console.error('Erro ao criar produto:', err.code, err.message, err.details);
-          throw err;
+        const response = await fetch(`${apiBase}/admin/products`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success || !result?.data?.id) {
+          throw new Error(result?.error || 'Erro ao criar produto');
         }
-        toast.success('Produto criado com sucesso!');
-        navigate(`/admin/produtos/editar/${data.id}`, { replace: true });
+        navigate(`/admin/produtos/editar/${result.data.id}`, { replace: true, state: { created: true } });
       }
     } catch (err: any) {
       const msg = err?.message || 'Erro desconhecido';
@@ -126,7 +160,7 @@ const CreateProduct: React.FC = () => {
                   const { data: urlData } = supabase.storage.from('product-covers').getPublicUrl(fileName);
                   setCoverImageUrl(urlData.publicUrl);
                 } catch (err: any) {
-                  setError('Erro ao fazer upload da imagem.');
+                  setError('Erro ao fazer upload da imagem: ' + (err?.message || ''));
                 } finally {
                   setUploadingImage(false);
                 }
@@ -150,11 +184,7 @@ const CreateProduct: React.FC = () => {
                 disabled={uploadingImage}
                 className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-surface py-8 text-muted-foreground hover:border-primary hover:text-foreground transition-colors disabled:opacity-50"
               >
-                {uploadingImage ? (
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                ) : (
-                  <ImageIcon className="h-6 w-6" />
-                )}
+                {uploadingImage ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImageIcon className="h-6 w-6" />}
                 <span className="text-sm">{uploadingImage ? 'Enviando...' : 'Clique para enviar imagem'}</span>
               </button>
             )}
@@ -180,79 +210,6 @@ const CreateProduct: React.FC = () => {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground">
-              ID do Produto na Kiwify
-              <span className="ml-1 text-destructive">*</span>
-            </label>
-            <input
-              value={kiwifyProductId}
-              onChange={(e) => setKiwifyProductId(e.target.value)}
-              className={`w-full rounded-xl border px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 transition-colors font-mono bg-surface ${
-                !kiwifyProductId.trim()
-                  ? 'border-amber-400 focus:border-amber-500 focus:ring-amber-400'
-                  : 'border-border focus:border-primary focus:ring-primary'
-              }`}
-              placeholder="Ex: prod_abc123xyz"
-            />
-            {!kiwifyProductId.trim() && (
-              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                <span>Obrigatório para o webhook funcionar.</span>
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              Encontre na URL ao editar o produto na Kiwify: dashboard.kiwify.com/products/edit/<strong>[ESSE-É-O-ID]</strong>
-            </p>
-
-            {/* Webhook test button */}
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  setTestingWebhook(true);
-                  setWebhookResult(null);
-                  try {
-                    const res = await supabase.functions.invoke('kiwify-webhook', {
-                      body: {
-                        webhook_event_type: 'order_approved',
-                        Customer: { email: 'teste@webhook.com', name: 'Teste Admin' },
-                        Product: { product_id: kiwifyProductId.trim() },
-                        order_id: `teste_${Date.now()}`,
-                        _teste: true,
-                      },
-                    });
-                    if (res.error) throw res.error;
-                    const data = res.data;
-                    if (data?.sucesso) {
-                      setWebhookResult({ success: true, message: `✅ Webhook OK! Produto "${data.produto}" encontrado.` });
-                    } else {
-                      setWebhookResult({ success: false, message: `❌ ${data?.erro || 'Erro desconhecido'}` });
-                    }
-                  } catch (err: any) {
-                    setWebhookResult({ success: false, message: `❌ ${err?.message || 'Erro desconhecido'}` });
-                  } finally {
-                    setTestingWebhook(false);
-                  }
-                }}
-                disabled={!kiwifyProductId.trim() || testingWebhook}
-                className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {testingWebhook ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                {testingWebhook ? 'Testando...' : 'Testar Webhook'}
-              </button>
-              {!kiwifyProductId.trim() && (
-                <span className="text-xs text-muted-foreground">Preencha o ID para testar</span>
-              )}
-            </div>
-
-            {webhookResult && (
-              <div className={`mt-2 rounded-xl px-3 py-2 text-xs ${webhookResult.success ? 'bg-secondary/10 text-secondary' : 'bg-destructive/10 text-destructive'}`}>
-                {webhookResult.message}
-              </div>
-            )}
-          </div>
-
-          <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">Mentor</label>
             <select
               required value={mentorId} onChange={(e) => setMentorId(e.target.value)}
@@ -264,7 +221,7 @@ const CreateProduct: React.FC = () => {
               ))}
             </select>
             {mentors.length === 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">Cadastre um mentor na personalização visual primeiro</p>
+              <p className="mt-1 text-xs text-muted-foreground">Cadastre um mentor primeiro</p>
             )}
           </div>
 

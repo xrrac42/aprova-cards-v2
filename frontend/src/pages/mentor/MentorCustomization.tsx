@@ -48,11 +48,14 @@ const MentorCustomization: React.FC = () => {
     if (logoFile) {
       const ext = logoFile.name.split('.').pop();
       const path = `${mentor.slug}-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
-      if (!error) {
-        const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
-        logoUrl = urlData.publicUrl;
+      const { error: uploadError } = await supabase.storage.from('mentor-logos').upload(path, logoFile);
+      if (uploadError) {
+        setLoading(false);
+        alert(`Falha ao enviar a logo: ${uploadError.message}`);
+        return;
       }
+      const { data: urlData } = supabase.storage.from('mentor-logos').getPublicUrl(path);
+      logoUrl = urlData.publicUrl;
     }
 
     await supabase.from('mentors').update({

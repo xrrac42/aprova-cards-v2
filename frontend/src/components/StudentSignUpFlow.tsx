@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -16,98 +15,72 @@ import {
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import PaymentCheckout from '@/components/PaymentCheckout';
 
-interface StudentSignUpFlowProps {
-  onSignUpComplete?: (studentAuthId: string) => void;
-}
+type Step = 'validating' | 'form' | 'redirecting' | 'invalid';
 
 const signUpSchema = z.object({
-  full_name: z.string().min(3, 'Name must be at least 3 characters').max(255),
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  full_name: z.string().min(3, 'Nome deve ter no mínimo 3 caracteres').max(255),
+  email: z.string().email('Email inválido'),
+  password: z.string().min(8, 'Senha deve ter no mínimo 8 caracteres'),
   confirm_password: z.string(),
 }).refine((data) => data.password === data.confirm_password, {
-  message: "Passwords don't match",
-  path: ["confirm_password"],
+  message: 'As senhas não coincidem',
+  path: ['confirm_password'],
 });
 
 type SignUpFormValues = z.infer<typeof signUpSchema>;
 
-type Step = 'validate_invite' | 'signup_form' | 'payment' | 'confirm_email' | 'complete';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
-export const StudentSignUpFlow: React.FC<StudentSignUpFlowProps> = ({
-  onSignUpComplete,
-}) => {
+export const StudentSignUpFlow: React.FC = () => {
   const [searchParams] = useSearchParams();
   const inviteCode = searchParams.get('code');
+  const amountCents = Number(searchParams.get('amount') || '9700');
 
-  const [currentStep, setCurrentStep] = useState<Step>('validate_invite');
-  const [loading, setLoading] = useState(true);
-  const [invitation, setInvitation] = useState<any | null>(null);
+  const [step, setStep] = useState<Step>('validating');
+  const [invitation, setInvitation] = useState<{ product_name: string; product_id: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [paymentId, setPaymentId] = useState<string | null>(null);
-  const [studentAuthData, setStudentAuthData] = useState<any | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<SignUpFormValues>({
     resolver: zodResolver(signUpSchema),
-    defaultValues: {
-      full_name: '',
-      email: '',
-      password: '',
-      confirm_password: '',
-    },
+    defaultValues: { full_name: '', email: '', password: '', confirm_password: '' },
   });
 
-  // Validate invitation code on mount
   useEffect(() => {
-    const validateInvite = async () => {
-      if (!inviteCode) {
-        toast.error('Invalid invitation link');
-        setCurrentStep('validate_invite');
-        setLoading(false);
-        return;
-      }
+    if (!inviteCode) { setStep('invalid'); return; }
 
+    const validate = async () => {
       try {
-        setLoading(true);
-        const response = await fetch('/api/invitations/validate', {
+        const resp = await fetch(`${BACKEND}/api/v1/invite/validate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ invite_code: inviteCode }),
         });
-
-        const data = await response.json();
-
-        if (!data.success || !data.data.is_valid) {
-          toast.error(data.data?.message || 'Invalid or expired invitation');
-          setCurrentStep('validate_invite');
-          setLoading(false);
+        const data = await resp.json();
+        if (!data.success || !data.data?.is_valid) {
+          setStep('invalid');
           return;
         }
-
-        setInvitation(data.data);
-        setCurrentStep('signup_form');
-      } catch (error) {
-        toast.error('Failed to validate invitation');
-        setCurrentStep('validate_invite');
-      } finally {
-        setLoading(false);
+        setInvitation({ product_name: data.data.product_name, product_id: data.data.product_id });
+        setStep('form');
+      } catch {
+        setStep('invalid');
       }
     };
 
-    validateInvite();
+    validate();
   }, [inviteCode]);
 
-  const onSubmitSignUp = async (values: SignUpFormValues) => {
-    try {
-      setLoading(true);
+  const onSubmit = async (values: SignUpFormValues) => {
+    if (!inviteCode || !invitation) return;
+    setSubmitting(true);
 
-      // Initiate signup
-      const response = await fetch('/api/auth/signup/initiate', {
+    try {
+      // 1. Criar conta no Supabase
+      const initiateResp = await fetch(`${BACKEND}/api/v1/auth/signup/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -117,117 +90,79 @@ export const StudentSignUpFlow: React.FC<StudentSignUpFlowProps> = ({
           full_name: values.full_name,
         }),
       });
-
-      const data = await response.json();
-
-      if (!data.success) {
-        toast.error(data.error || 'Failed to initiate signup');
+      const initiateData = await initiateResp.json();
+      if (!initiateData.success) {
+        toast.error(initiateData.error || 'Erro ao criar conta');
         return;
       }
 
-      // Move to payment step
-      setCurrentStep('payment');
-      toast.success('Now complete your payment to activate access');
-    } catch (error) {
-      toast.error('Failed to initiate signup');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePaymentSuccess = async (paymentId: string) => {
-    try {
-      setLoading(true);
-      setPaymentId(paymentId);
-
-      // Complete signup after payment
-      const response = await fetch('/api/auth/signup/complete', {
+      // 2. Criar sessão de checkout Stripe
+      setStep('redirecting');
+      const checkoutResp = await fetch(`${BACKEND}/api/v1/invite/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          payment_id: paymentId,
           invite_code: inviteCode,
-          email: form.getValues('email'),
-          full_name: form.getValues('full_name'),
+          amount_cents: amountCents,
+          currency: 'brl',
         }),
       });
-
-      const data = await response.json();
-
-      if (!data.success) {
-        toast.error(data.error || 'Failed to complete signup');
+      const checkoutData = await checkoutResp.json();
+      if (!checkoutData.success || !checkoutData.data?.session_url) {
+        toast.error(checkoutData.error || 'Erro ao iniciar pagamento');
+        setStep('form');
         return;
       }
 
-      setStudentAuthData(data.data);
-      setCurrentStep('complete');
-      toast.success('Account created successfully!');
-
-      if (onSignUpComplete) {
-        onSignUpComplete(data.data.student_auth_id);
-      }
-    } catch (error) {
-      toast.error('Failed to complete signup');
+      // 3. Redirecionar para o Stripe
+      window.location.href = checkoutData.data.session_url;
+    } catch (err: any) {
+      toast.error(err.message || 'Erro inesperado');
+      setStep('form');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  if (loading && currentStep === 'validate_invite') {
+  if (step === 'validating') {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-12 pb-12 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-            <p>Validating your invitation...</p>
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+            <p className="text-muted-foreground">Validando convite…</p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  if (currentStep === 'validate_invite' || !invitation) {
+  if (step === 'invalid') {
     return (
-      <div className="flex items-center justify-center min-h-screen p-4">
+      <div className="flex min-h-screen items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardContent className="pt-12 pb-12 text-center space-y-4">
-            <AlertCircle className="h-12 w-12 text-red-600 mx-auto" />
-            <h2 className="text-2xl font-bold">Invalid Invitation</h2>
-            <p className="text-gray-600">
-              The invitation link is invalid or has expired.
+            <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+            <h2 className="text-2xl font-bold">Convite inválido</h2>
+            <p className="text-muted-foreground">
+              Este link de convite é inválido ou expirou. Solicite um novo convite ao seu instrutor.
             </p>
-            <Button onClick={() => window.location.href = '/'}>
-              Go Home
-            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  if (currentStep === 'complete' && studentAuthData) {
+  if (step === 'redirecting') {
     return (
-      <div className="flex items-center justify-center min-h-screen p-4">
+      <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-12 pb-12 text-center space-y-4">
-            <CheckCircle2 className="h-12 w-12 text-green-600 mx-auto" />
-            <h2 className="text-2xl font-bold">Welcome to {invitation.product_name}!</h2>
-            <p className="text-gray-600">
-              Your account has been created successfully. You can now log in with your email and password.
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+            <h2 className="text-xl font-semibold">Redirecionando para o pagamento…</h2>
+            <p className="text-muted-foreground text-sm">
+              Você será levado ao ambiente seguro do Stripe.
             </p>
-            <div className="bg-gray-50 p-4 rounded-lg text-left space-y-2 text-sm">
-              <div>
-                <p className="text-gray-600">Email:</p>
-                <p className="font-mono">{studentAuthData.email}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Account ID:</p>
-                <p className="font-mono text-xs break-all">{studentAuthData.student_auth_id}</p>
-              </div>
-            </div>
-            <Button onClick={() => window.location.href = '/login'} className="w-full">
-              Go to Login
-            </Button>
           </CardContent>
         </Card>
       </div>
@@ -235,152 +170,119 @@ export const StudentSignUpFlow: React.FC<StudentSignUpFlowProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-8 px-4">
-      <div className="max-w-2xl mx-auto">
-        <Tabs value={currentStep} className="w-full">
-          {/* Signup Form Step */}
-          <TabsContent value="signup_form">
-            <Card>
-              <CardHeader>
-                <CardTitle>Complete Your Registration</CardTitle>
-                <CardDescription>
-                  Sign up for {invitation?.product_name}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmitSignUp)} className="space-y-6">
-                    <FormField
-                      control={form.control}
-                      name="full_name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Full Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="John Doe" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-background dark:to-background py-8 px-4">
+      <div className="max-w-md mx-auto space-y-6">
+        <div className="text-center space-y-1">
+          <h1 className="text-2xl font-bold">{invitation?.product_name}</h1>
+          <p className="text-muted-foreground text-sm">
+            Crie sua conta e conclua o pagamento para ter acesso imediato.
+          </p>
+        </div>
 
-                    <FormField
-                      control={form.control}
-                      name="email"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Email</FormLabel>
-                          <FormControl>
-                            <Input type="email" placeholder="john@example.com" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+        <Card>
+          <CardHeader>
+            <CardTitle>Criar conta</CardTitle>
+            <CardDescription>Preencha seus dados para começar</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="full_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nome completo</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Maria Silva" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                    <FormField
-                      control={form.control}
-                      name="password"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Password</FormLabel>
-                          <FormControl>
-                            <div className="relative">
-                              <Input
-                                type={showPassword ? 'text' : 'password'}
-                                placeholder="••••••••"
-                                {...field}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2"
-                              >
-                                {showPassword ? (
-                                  <EyeOff className="h-4 w-4 text-gray-400" />
-                                ) : (
-                                  <Eye className="h-4 w-4 text-gray-400" />
-                                )}
-                              </button>
-                            </div>
-                          </FormControl>
-                          <FormDescription>
-                            Minimum 8 characters
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="maria@email.com" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                    <FormField
-                      control={form.control}
-                      name="confirm_password"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Confirm Password</FormLabel>
-                          <FormControl>
-                            <div className="relative">
-                              <Input
-                                type={showPassword ? 'text' : 'password'}
-                                placeholder="••••••••"
-                                {...field}
-                              />
-                            </div>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Senha</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Input
+                            type={showPassword ? 'text' : 'password'}
+                            placeholder="Mínimo 8 caracteres"
+                            {...field}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          >
+                            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                    <Alert>
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        You'll need to verify your email and complete a payment to activate access.
-                      </AlertDescription>
-                    </Alert>
+                <FormField
+                  control={form.control}
+                  name="confirm_password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Confirmar senha</FormLabel>
+                      <FormControl>
+                        <Input
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Repita a senha"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                    <Button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full"
-                    >
-                      {loading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        'Continue to Payment'
-                      )}
-                    </Button>
-                  </form>
-                </Form>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                <Alert>
+                  <ExternalLink className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    Após criar a conta, você será redirecionado ao Stripe para concluir o pagamento com segurança.
+                  </AlertDescription>
+                </Alert>
 
-          {/* Payment Step */}
-          <TabsContent value="payment">
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Complete Your Payment</CardTitle>
-                  <CardDescription>
-                    Secure your access to {invitation?.product_name}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+                <Button type="submit" disabled={submitting} className="w-full">
+                  {submitting ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processando…</>
+                  ) : (
+                    'Criar conta e ir para o pagamento'
+                  )}
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
 
-              <PaymentCheckout
-                studentEmail={form.getValues('email')}
-                productId={invitation?.product_id}
-                amountCents={10000} // This should come from product pricing
-                productName={invitation?.product_name}
-                onPaymentSuccess={handlePaymentSuccess}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
+        <p className="text-center text-xs text-muted-foreground">
+          Já tem conta?{' '}
+          <a href="/login" className="underline hover:text-foreground">Faça login</a>
+        </p>
       </div>
     </div>
   );

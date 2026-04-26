@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
@@ -6,8 +6,11 @@ import { sanitizeCardFields } from '@/lib/html-entities';
 import { AdminLayout } from './AdminDashboard';
 import { parseFileWithFormat, validateCards, type ParsedCard } from '@/lib/csv-parser';
 import CardContent from '@/components/CardContent';
-import { Upload, Check, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Upload, Check, X, Loader2, AlertTriangle, Sparkles, FileText } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const BATCH_SIZE = 500;
 
@@ -41,6 +44,14 @@ const AdminUpload: React.FC = () => {
   const [showCorrupted, setShowCorrupted] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
 
+  // AI generation state
+  const [aiDocText, setAiDocText] = useState('');
+  const [aiLimit, setAiLimit] = useState(20);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [aiMsg, setAiMsg] = useState('');
+  const [extractingPdf, setExtractingPdf] = useState(false);
+  const aiFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!session || session.role !== 'admin') { navigate('/login'); return; }
     supabase.from('mentors').select('id, name').order('name').then(({ data }) => setMentors(data || []));
@@ -54,9 +65,68 @@ const AdminUpload: React.FC = () => {
 
   useEffect(() => {
     if (!selectedProduct) { setDisciplines([]); setSelectedDiscipline(''); return; }
-    supabase.from('disciplines').select('id, name').eq('product_id', selectedProduct).order('order')
-      .then(({ data }) => { setDisciplines(data || []); setSelectedDiscipline(''); });
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+    fetch(`${backendURL}/api/v1/admin/products/${selectedProduct}/disciplines`)
+      .then(r => r.json())
+      .then(data => { setDisciplines(data?.data || []); setSelectedDiscipline(''); })
+      .catch(() => { setDisciplines([]); setSelectedDiscipline(''); });
   }, [selectedProduct]);
+
+  const handleAiFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExtractingPdf(true);
+    setAiMsg('');
+    try {
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map((item: any) => item.str).join(' ') + '\n';
+        }
+        setAiDocText(text.trim());
+        setAiMsg(`✅ PDF extraído: ${pdf.numPages} página(s), ${text.trim().length} caracteres.`);
+      } else {
+        const text = await file.text();
+        setAiDocText(text.trim());
+        setAiMsg(`✅ Arquivo carregado: ${text.trim().length} caracteres.`);
+      }
+    } catch (err: any) {
+      setAiMsg(`❌ Erro ao ler arquivo: ${err.message}`);
+    } finally {
+      setExtractingPdf(false);
+      if (aiFileRef.current) aiFileRef.current.value = '';
+    }
+  };
+
+  const generateCardsWithAI = async () => {
+    if (!selectedDiscipline) { setAiMsg('❌ Selecione uma disciplina primeiro.'); return; }
+    if (aiDocText.trim().length < 10) { setAiMsg('❌ Cole o texto do documento (mínimo 10 caracteres).'); return; }
+    setGeneratingAI(true);
+    setAiMsg('');
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+    try {
+      const resp = await fetch(`${backendURL}/api/v1/admin/disciplines/${selectedDiscipline}/generate-ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: aiDocText.trim(), limit: aiLimit }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        setAiMsg(`❌ ${data.error || 'Erro ao gerar cards com IA'}`);
+        return;
+      }
+      setAiMsg(`✅ ${data.data.generated} cards gerados com IA e salvos na disciplina!`);
+      setAiDocText('');
+    } catch (err: any) {
+      setAiMsg(`❌ Erro: ${err.message}`);
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -394,6 +464,92 @@ const AdminUpload: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* AI Generation */}
+          <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-violet-600" />
+              <h2 className="font-display font-semibold text-foreground">Gerar cards com IA</h2>
+            </div>
+            {selectedDiscipline ? (
+              <div className="rounded-lg bg-violet-50 dark:bg-violet-900/20 px-3 py-2 text-sm text-violet-700 dark:text-violet-300">
+                Disciplina selecionada: <strong>{disciplines.find(d => d.id === selectedDiscipline)?.name}</strong>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                ⚠️ Selecione mentor → produto → disciplina nos campos acima para habilitar a geração.
+              </div>
+            )}
+
+            <p className="text-sm text-muted-foreground">
+              Envie um PDF ou TXT, ou cole o texto diretamente.
+            </p>
+
+            {/* File picker */}
+            <div className="flex items-center gap-3">
+              <input
+                ref={aiFileRef}
+                type="file"
+                accept=".pdf,.txt"
+                onChange={handleAiFileUpload}
+                disabled={extractingPdf}
+                className="hidden"
+                id="ai-file-input"
+              />
+              <label
+                htmlFor="ai-file-input"
+                className={`flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground cursor-pointer hover:bg-surface-hover transition-colors ${extractingPdf ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                {extractingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                {extractingPdf ? 'Extraindo texto…' : 'Enviar PDF ou TXT'}
+              </label>
+              {aiDocText && (
+                <span className="text-xs text-muted-foreground">{aiDocText.length.toLocaleString()} caracteres carregados</span>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Texto do documento</label>
+              <textarea
+                value={aiDocText}
+                onChange={e => setAiDocText(e.target.value)}
+                rows={8}
+                placeholder="Cole aqui o conteúdo do documento (ou use o botão acima para carregar um PDF/TXT)..."
+                className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-violet-500 focus:outline-none resize-y transition-colors"
+              />
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Limite de cards</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={aiLimit}
+                  onChange={e => setAiLimit(Number(e.target.value))}
+                  className="w-24 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground focus:border-violet-500 focus:outline-none transition-colors"
+                />
+              </div>
+              <div className="pt-6">
+                <button
+                  onClick={generateCardsWithAI}
+                  disabled={generatingAI || !selectedDiscipline || aiDocText.trim().length < 10}
+                  className="flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-2.5 font-medium text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {generatingAI ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {generatingAI ? 'Gerando…' : 'Gerar com IA'}
+                </button>
+              </div>
+            </div>
+
+            {aiMsg && (
+              <p className={`rounded-lg px-3 py-2 text-sm ${
+                aiMsg.startsWith('✅') ? 'bg-secondary/10 text-secondary' : 'bg-destructive/10 text-destructive'
+              }`}>{aiMsg}</p>
+            )}
+          </div>
+
         </div>
       </div>
     </AdminLayout>

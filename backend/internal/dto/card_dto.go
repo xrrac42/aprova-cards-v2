@@ -22,3 +22,13 @@ type CardResponse struct {
 	Order        int    `json:"order"`
 	CreatedAt    string `json:"created_at"`
 }
+
+type GenerateCardsRequest struct {
+	Context string `json:"context" binding:"required,min=10"`
+	Limit   int    `json:"limit"`
+}
+
+type GenerateCardsResponse struct {
+	Cards     []CardResponse `json:"cards"`
+	Generated int            `json:"generated"`
+}

@@ -11,7 +11,7 @@ const navItems = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/admin/mentores', label: 'Mentores', icon: Users },
   { to: '/admin/produtos', label: 'Produtos', icon: Package },
-  
+  { to: '/admin/upload', label: 'Importar / IA', icon: Upload },
   { to: '/admin/alunos', label: 'Alunos', icon: GraduationCap },
   { to: '/admin/relatorios', label: 'Relatórios', icon: BarChart3 },
   { to: '/admin/feedbacks', label: 'Feedbacks', icon: MessageSquare },

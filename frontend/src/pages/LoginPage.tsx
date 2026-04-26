@@ -13,43 +13,146 @@ import { applyMentorTheme, resetTheme } from '@/lib/theme';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+
+const normalizeSlug = (value?: string) =>
+  decodeURIComponent((value || '').trim())
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase();
+
+const isValidSlugFormat = (value: string) =>
+  value.length >= 3 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+
+const asHexColor = (value: string | null | undefined, fallback: string) => {
+  const raw = (value || '').trim();
+  if (!raw) return fallback;
+  const normalized = raw.startsWith('#') ? raw : `#${raw}`;
+  return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : fallback;
+};
+
+const resolveLogoUrl = (logoUrl: string | null | undefined) => {
+  if (!logoUrl) return null;
+  if (/^https?:\/\//i.test(logoUrl)) return logoUrl;
+  return supabase.storage.from('mentor-logos').getPublicUrl(logoUrl).data.publicUrl;
+};
+
+const inferSlugFromHostname = () => {
+  if (typeof window === 'undefined') return '';
+
+  const host = window.location.hostname.toLowerCase();
+  if (!host || host === 'localhost' || host === '127.0.0.1') return '';
+
+  const parts = host.split('.');
+  if (parts.length < 3) return '';
+
+  const subdomain = parts[0];
+  if (!subdomain || subdomain === 'www') return '';
+
+  return normalizeSlug(subdomain);
+};
+
+const resolvePortalSlug = (routeSlug?: string) => {
+  const fromRoute = normalizeSlug(routeSlug);
+  if (fromRoute) return fromRoute;
+
+  if (typeof window !== 'undefined') {
+    const qp = new URLSearchParams(window.location.search).get('slug') || '';
+    const fromQuery = normalizeSlug(qp);
+    if (fromQuery) return fromQuery;
+  }
+
+  return inferSlugFromHostname();
+};
+
 const LoginPage: React.FC = () => {
   const { slug } = useParams<{ slug?: string }>();
+  const portalSlug = resolvePortalSlug(slug);
+  const invalidPortalSlug = !!portalSlug && !isValidSlugFormat(portalSlug);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState('');
   const [mentor, setMentor] = useState<any>(null);
-  const [mentorLoading, setMentorLoading] = useState(!!slug);
+  const [mentorLoading, setMentorLoading] = useState(!!portalSlug && !invalidPortalSlug);
   const [mentorNotFound, setMentorNotFound] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!slug) {
+    const sanitizedSlug = portalSlug;
+    if (!sanitizedSlug) {
+      setMentor(null);
+      setMentorNotFound(false);
+      setMentorLoading(false);
       resetTheme();
       return;
     }
+
+    if (!isValidSlugFormat(sanitizedSlug)) {
+      setMentor(null);
+      setMentorNotFound(false);
+      setMentorLoading(false);
+      resetTheme();
+      return;
+    }
+
     (async () => {
       setMentorLoading(true);
-      const { data } = await supabase
-        .from('mentors')
-        .select('id, name, logo_url, primary_color, secondary_color, accent_color')
-        .eq('slug', slug)
-        .maybeSingle();
+      setMentorNotFound(false);
 
-      if (data) {
-        setMentor(data);
-        applyMentorTheme(data.primary_color, data.secondary_color, data.accent_color);
+      const mentorSelect = 'id, name, slug, logo_url, primary_color, secondary_color';
+      let { data, error } = await supabase
+        .from('mentors')
+        .select(mentorSelect)
+        .eq('slug', sanitizedSlug)
+        .limit(1);
+
+      let mentorData = data?.[0] ?? null;
+
+      // Fallback case-insensitive lookup for older data with inconsistent casing.
+      if (!mentorData && !error) {
+        const fallback = await supabase
+          .from('mentors')
+          .select(mentorSelect)
+          .ilike('slug', sanitizedSlug)
+          .limit(1);
+        mentorData = fallback.data?.[0] ?? null;
+        error = fallback.error;
+      }
+
+      if (error) {
+        console.error('Erro ao carregar mentor por slug:', error.message);
+        setMentor(null);
+        setMentorNotFound(false);
+        setMentorLoading(false);
+        return;
+      }
+
+      if (mentorData) {
+        const preparedMentor = {
+          ...mentorData,
+          logo_url: resolveLogoUrl((mentorData as any).logo_url),
+          primary_color: asHexColor((mentorData as any).primary_color, '#6c63ff'),
+          secondary_color: asHexColor((mentorData as any).secondary_color, '#43e97b'),
+          accent_color: '#ffd166',
+        };
+
+        setMentor(preparedMentor);
+        applyMentorTheme(
+          preparedMentor.primary_color,
+          preparedMentor.secondary_color,
+          preparedMentor.accent_color,
+        );
       } else {
+        setMentor(null);
         setMentorNotFound(true);
       }
       setMentorLoading(false);
     })();
 
     return () => resetTheme();
-  }, [slug]);
+  }, [portalSlug]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +161,31 @@ const LoginPage: React.FC = () => {
     setLoadingMessage('Verificando acesso...');
 
     try {
-      const { redirect, session } = await login(email, password, (msg) => setLoadingMessage(msg));
+      if (invalidPortalSlug) {
+        throw new Error('Slug inválido. Verifique o link de acesso do mentor.');
+      }
+
+      const { redirect, session, accessToken } = await login(email, password, (msg) => setLoadingMessage(msg));
+      const sanitizedSlug = portalSlug;
+
+      if (sanitizedSlug && session.role === 'aluno') {
+        setLoadingMessage('Validando portal do mentor...');
+
+        const validationRes = await fetch(`${BACKEND_URL}/api/v1/auth/validate-student-access`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ slug: sanitizedSlug }),
+        });
+
+        if (!validationRes.ok) {
+          const payload = await validationRes.json().catch(() => null);
+          const serverMessage = payload?.error || 'Acesso negado. Você não possui permissão para acessar este portal.';
+          throw new Error(`${serverMessage} Se você acredita que isso é um erro, procure o suporte ou utilize o link correto do seu mentor.`);
+        }
+      }
       
       // 🎉 Popup de sucesso
       toast({
@@ -179,6 +306,17 @@ const LoginPage: React.FC = () => {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4 gap-4">
         <p className="text-center text-muted-foreground">Mentor não encontrado.</p>
+        <button onClick={() => navigate('/login')} className="rounded-2xl bg-primary px-6 py-3 font-display font-semibold text-primary-foreground hover:opacity-90">
+          Ir para login
+        </button>
+      </div>
+    );
+  }
+
+  if (invalidPortalSlug) {
+    return (
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4 gap-4">
+        <p className="text-center text-muted-foreground">Slug inválido. Verifique o link de acesso do mentor.</p>
         <button onClick={() => navigate('/login')} className="rounded-2xl bg-primary px-6 py-3 font-display font-semibold text-primary-foreground hover:opacity-90">
           Ir para login
         </button>

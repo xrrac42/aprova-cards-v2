@@ -9,15 +9,20 @@ import (
 )
 
 type Config struct {
-	Admin         AdminConfig
-	Server        ServerConfig
-	Database      DatabaseConfig
-	JWT           JWTConfig
-	CORS          CORSConfig
-	RateLimit     RateLimitConfig
-	Supabase      SupabaseConfig
-	Stripe        StripeConfig
-	FrontendURL   string
+	Admin       AdminConfig
+	Server      ServerConfig
+	Database    DatabaseConfig
+	JWT         JWTConfig
+	CORS        CORSConfig
+	RateLimit   RateLimitConfig
+	Supabase    SupabaseConfig
+	Stripe      StripeConfig
+	OpenAI      OpenAIConfig
+	FrontendURL string
+}
+
+type OpenAIConfig struct {
+	APIKey string
 }
 
 type StripeConfig struct {
@@ -97,11 +102,14 @@ func Load() *Config {
 			ServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
 		},
 		Stripe: StripeConfig{
-			SecretKey:      getEnv("STRIPE_SECRET_KEY", ""),
-			WebhookSecret:  getEnv("STRIPE_WEBHOOK_SECRET", ""),
-			PublishableKey: getEnv("STRIPE_PUBLISHABLE_KEY", ""),
+			SecretKey:      getEnvFirst([]string{"STRIPE_SECRET_KEY", "STRIPE_SECRET", "STRIPE_API_KEY"}, ""),
+			WebhookSecret:  getEnvFirst([]string{"STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SIGNING_SECRET"}, ""),
+			PublishableKey: getEnvFirst([]string{"STRIPE_PUBLISHABLE_KEY", "VITE_STRIPE_PUBLISHABLE_KEY"}, ""),
 		},
-		FrontendURL:   getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
+		OpenAI: OpenAIConfig{
+			APIKey: getEnv("OPENAI_API_KEY", ""),
+		},
+		FrontendURL: getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
 	}
 }
 

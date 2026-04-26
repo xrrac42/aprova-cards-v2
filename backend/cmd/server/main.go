@@ -110,10 +110,6 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.DELETE("/admin/disciplines/:id", discHandlerAdmin.Delete)
 	api.POST("/admin/disciplines/:id/reorder", discHandlerAdmin.Reorder)
 
-	// ---- Admin AI/Diagnostics (public with rate limit) ----
-	cardAnalysisHandler := handlers.NewCardAnalysisHandler(cfg.LovableAPIKey)
-	api.POST("/admin/cards/analyze", cardAnalysisHandler.AnalyzeCards)
-
 	healthCheckHandler := handlers.NewHealthCheckHandler(db)
 	api.GET("/admin/health-check", healthCheckHandler.Check)
 

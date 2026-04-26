@@ -18,7 +18,6 @@ type Config struct {
 	Supabase      SupabaseConfig
 	Stripe        StripeConfig
 	FrontendURL   string
-	LovableAPIKey string
 }
 
 type StripeConfig struct {
@@ -103,7 +102,6 @@ func Load() *Config {
 			PublishableKey: getEnv("STRIPE_PUBLISHABLE_KEY", ""),
 		},
 		FrontendURL:   getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
-		LovableAPIKey: getEnv("LOVABLE_API_KEY", ""),
 	}
 }
 

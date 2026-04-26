@@ -5,12 +5,12 @@
 // Alunos com reembolso ou chargeback têm active = false e não conseguem entrar.
 // NUNCA remover essa verificação dupla.
 
-import { supabase } from '@/integrations/supabase/client';
-import type { Session } from '@/types';
+import { supabase } from "@/integrations/supabase/client";
+import type { Session } from "@/types";
 
-const SESSION_KEY = 'flashcard_session';
+const SESSION_KEY = "flashcard_session";
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
 
 export function getSession(): Session | null {
   const raw = localStorage.getItem(SESSION_KEY);
@@ -28,7 +28,10 @@ export function getSession(): Session | null {
 }
 
 export function setSession(session: Session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, expires_at: Date.now() + SESSION_TTL_MS }));
+  localStorage.setItem(
+    SESSION_KEY,
+    JSON.stringify({ ...session, expires_at: Date.now() + SESSION_TTL_MS }),
+  );
 }
 
 export function clearSession() {
@@ -40,24 +43,27 @@ export function clearSession() {
  * Retorna os dados do usuário se o token for válido
  * Rejeita com erro 401 se inválido/expirado
  */
-export async function validateToken(token: string): Promise<{ email: string; uid: string; expiresAt: number }> {
+export async function validateToken(
+  token: string,
+): Promise<{ email: string; uid: string; expiresAt: number }> {
   try {
     // Usar a sessão do Supabase para validar o token
     const { data, error } = await supabase.auth.getUser(token);
 
     if (error || !data.user) {
-      throw new Error('Token inválido ou expirado');
+      throw new Error("Token inválido ou expirado");
     }
 
     return {
-      email: data.user.email || '',
+      email: data.user.email || "",
       uid: data.user.id,
       expiresAt: data.user.user_metadata?.expires_at || Date.now(),
     };
   } catch (error) {
     throw {
       status: 401,
-      message: error instanceof Error ? error.message : 'Token inválido ou expirado',
+      message:
+        error instanceof Error ? error.message : "Token inválido ou expirado",
     };
   }
 }
@@ -72,7 +78,7 @@ export async function refreshToken(refreshToken: string) {
     });
 
     if (error || !data.session) {
-      throw new Error('Não foi possível renovar o token');
+      throw new Error("Não foi possível renovar o token");
     }
 
     return {
@@ -83,7 +89,7 @@ export async function refreshToken(refreshToken: string) {
   } catch (error) {
     throw {
       status: 401,
-      message: error instanceof Error ? error.message : 'Erro ao renovar token',
+      message: error instanceof Error ? error.message : "Erro ao renovar token",
     };
   }
 }
@@ -97,29 +103,35 @@ export type LoginProgress = (message: string) => void;
 export async function login(
   email: string,
   password: string,
-  onProgress?: LoginProgress
-): Promise<{ session: Session; redirect: string; accessToken: string; refreshToken: string }> {
-  onProgress?.('Autenticando com Supabase...');
+  onProgress?: LoginProgress,
+): Promise<{
+  session: Session;
+  redirect: string;
+  accessToken: string;
+  refreshToken: string;
+}> {
+  onProgress?.("Autenticando com Supabase...");
 
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedPassword = password.trim();
   const normalizedCode = trimmedPassword.toUpperCase();
 
   // 1. Tentar autenticação real com Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-    email: normalizedEmail,
-    password: trimmedPassword,
-  });
+  const { data: authData, error: authError } =
+    await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password: trimmedPassword,
+    });
 
   // Se falhou, poderia ser mentor ou aluno (verificar lógica antiga)
   if (authError) {
-    onProgress?.('Verificando acesso alternativo...');
+    onProgress?.("Verificando acesso alternativo...");
 
     // 2. Verificar se é admin via backend Go
     try {
       const response = await fetch(`${BACKEND_URL}/api/v1/auth/admin-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: normalizedEmail,
           password: trimmedPassword,
@@ -129,13 +141,13 @@ export async function login(
       if (response.ok) {
         const data = await response.json();
         if (data?.data?.token) {
-          const session: Session = { email: normalizedEmail, role: 'admin' };
+          const session: Session = { email: normalizedEmail, role: "admin" };
           setSession(session);
           return {
             session,
-            redirect: '/admin',
+            redirect: "/admin",
             accessToken: data.data.token,
-            refreshToken: '',
+            refreshToken: "",
           };
         }
       }
@@ -143,52 +155,85 @@ export async function login(
       // Ignore backend unreachable error
     }
 
-    throw new Error('Email ou senha inválidos.');
+    throw new Error("Email ou senha inválidos.");
   }
 
   if (!authData.session) {
-    throw new Error('Falha ao criar sessão. Tente novamente.');
+    throw new Error("Falha ao criar sessão. Tente novamente.");
   }
 
   const user = authData.session.user;
   const accessToken = authData.session.access_token;
-  const refreshTokenValue = authData.session.refresh_token || '';
+  const refreshTokenValue = authData.session.refresh_token || "";
 
-  onProgress?.('Verificando seu perfil...');
+  // 3.5 Verificar se é admin via API Go (quando Supabase Auth funciona)
+  try {
+    const adminRes = await fetch(`${BACKEND_URL}/api/v1/auth/admin-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password: trimmedPassword,
+      }),
+    });
+    if (adminRes.ok) {
+      const adminData = await adminRes.json();
+      if (adminData?.success) {
+        const session: Session = {
+          email: user.email || normalizedEmail,
+          role: "admin",
+        };
+        setSession(session);
+        return {
+          session,
+          redirect: "/admin",
+          accessToken,
+          refreshToken: refreshTokenValue,
+        };
+      }
+    }
+  } catch {
+    // Backend unreachable, continue normal flow
+  }
+
+  onProgress?.("Verificando seu perfil...");
 
   // 4. Verificar role do usuário: verifica se é produto/aluno
   const { data: productResult } = await supabase
-    .from('products')
-    .select('id, name, mentor_id, access_code')
-    .eq('access_code', normalizedCode)
-    .eq('active', true)
+    .from("products")
+    .select("id, name, mentor_id, access_code")
+    .eq("access_code", normalizedCode)
+    .eq("active", true)
     .maybeSingle();
 
   // Check user_roles table to get the correct role
-  onProgress?.('Verificando seu perfil...');
-  
+  onProgress?.("Verificando seu perfil...");
+
   const { data: userRoleResult } = await supabase
-    .from('user_roles')
-    .select('role, mentor_id, product_id, active')
-    .eq('email', user.email)
+    .from("user_roles")
+    .select("role, mentor_id, product_id, active")
+    .eq("email", user.email)
     .maybeSingle();
 
   if (!userRoleResult || !userRoleResult.active) {
-    throw new Error('Seu acesso foi desativado. Entre em contato com o administrador.');
+    throw new Error(
+      "Seu acesso foi desativado. Entre em contato com o administrador.",
+    );
   }
 
-  const userRole = (userRoleResult.role as 'aluno' | 'mentor' | 'admin') || 'aluno';
-  let redirectPath = '/aluno';
+  const userRole =
+    (userRoleResult.role as "aluno" | "mentor" | "admin") || "aluno";
+  let redirectPath = "/aluno";
   let sessionMentorId: string | undefined;
   let sessionProductId: string | undefined;
 
-  if (userRole === 'admin') {
-    redirectPath = '/admin';
-  } else if (userRole === 'mentor') {
-    redirectPath = '/mentor';
+  if (userRole === "admin") {
+    redirectPath = "/admin";
+  } else if (userRole === "mentor") {
+    redirectPath = "/mentor";
     sessionMentorId = userRoleResult.mentor_id || undefined;
-  } else if (userRole === 'aluno' && productResult) {
-    redirectPath = '/aluno';
+  } else if (userRole === "aluno" && productResult) {
+    redirectPath = "/aluno";
     sessionProductId = productResult.id;
     sessionMentorId = productResult.mentor_id;
   }
@@ -197,14 +242,14 @@ export async function login(
   let mentorData = null;
   if (sessionMentorId) {
     const { data } = await supabase
-      .from('mentors')
-      .select('id, name, primary_color, secondary_color, logo_url')
-      .eq('id', sessionMentorId)
+      .from("mentors")
+      .select("id, name, primary_color, secondary_color, logo_url")
+      .eq("id", sessionMentorId)
       .maybeSingle();
     mentorData = data;
   }
 
-  onProgress?.('Carregando seu material...');
+  onProgress?.("Carregando seu material...");
 
   const session: Session = {
     email: user.email || normalizedEmail,
@@ -215,8 +260,8 @@ export async function login(
   };
 
   setSession(session);
-  return { 
-    session, 
+  return {
+    session,
     redirect: redirectPath,
     accessToken,
     refreshToken: refreshTokenValue,
@@ -230,9 +275,9 @@ export async function login(
 export async function signup(
   email: string,
   password: string,
-  onProgress?: LoginProgress
+  onProgress?: LoginProgress,
 ): Promise<{ user: any; session: Session }> {
-  onProgress?.('Criando conta...');
+  onProgress?.("Criando conta...");
 
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -246,14 +291,14 @@ export async function signup(
   }
 
   if (!signupData.user) {
-    throw new Error('Falha ao criar usuário.');
+    throw new Error("Falha ao criar usuário.");
   }
 
-  onProgress?.('Conta criada com sucesso!');
+  onProgress?.("Conta criada com sucesso!");
 
   const session: Session = {
     email: normalizedEmail,
-    role: 'aluno',
+    role: "aluno",
   };
 
   setSession(session);
@@ -278,7 +323,7 @@ export async function logout(): Promise<void> {
  */
 export async function getCurrentSession() {
   const { data, error } = await supabase.auth.getSession();
-  
+
   if (error || !data.session) {
     return null;
   }

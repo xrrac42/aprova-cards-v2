@@ -227,37 +227,64 @@ func (uc *studentSignUpUseCase) ValidateInviteCode(code string) (*dto.ValidateIn
 
 // InitiateStudentSignUp initiates student signup process
 func (uc *studentSignUpUseCase) InitiateStudentSignUp(req *dto.StudentSignUpRequest) (*dto.StudentSignUpResponse, error) {
-	// Validate invitation code
 	validation, err := uc.ValidateInviteCode(req.InviteCode)
 	if err != nil {
 		return nil, err
 	}
-
 	if !validation.IsValid {
 		return nil, errors.NewBadRequest(validation.Message)
 	}
 
-	// Get invitation
 	invitation, err := uc.invitationRepo.GetByInviteCode(req.InviteCode)
 	if err != nil {
 		return nil, errors.NewInternalServerError("Failed to fetch invitation")
 	}
 
-	// Check if email is already used
 	existingAuth, err := uc.invitationRepo.GetStudentAuthByEmail(req.Email)
 	if err != nil {
 		return nil, errors.NewInternalServerError("Failed to check email")
 	}
 	if existingAuth != nil {
-		return nil, errors.NewBadRequest("Email already registered")
+		return nil, errors.NewBadRequest("E-mail inválido ou já cadastrado")
 	}
 
-	// Update invitation with student email and mark as signed_up
+	// Create Supabase user with the student's real password so they can log in after payment.
+	supabaseUserID := uuid.New().String()
+	if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+		userMetadata := map[string]interface{}{
+			"role":          "aluno",
+			"mentor_id":     invitation.MentorID,
+			"product_id":    invitation.ProductID,
+			"invitation_id": invitation.ID,
+			"signup_method": "student_invitation",
+		}
+		authUser, authErr := uc.supabaseAdmin.CreateAuthUserWithMetadata(req.Email, req.Password, userMetadata)
+		if authErr != nil {
+			return nil, errors.NewBadRequest("E-mail inválido ou já cadastrado")
+		}
+		supabaseUserID = authUser.ID
+	}
+
+	// Persist student_auth immediately so the webhook can skip re-creation.
+	studentAuth := &models.StudentAuth{
+		StudentEmail:   req.Email,
+		SupabaseUserID: supabaseUserID,
+		InvitationID:   &invitation.ID,
+		MentorID:       invitation.MentorID,
+		ProductID:      invitation.ProductID,
+	}
+	if err := uc.invitationRepo.CreateStudentAuth(studentAuth); err != nil {
+		// Roll back the Supabase user to keep state consistent.
+		if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+			_ = uc.supabaseAdmin.DeleteAuthUser(supabaseUserID)
+		}
+		return nil, errors.NewInternalServerError("Failed to create student auth")
+	}
+
 	now := time.Now()
 	invitation.StudentEmail = &req.Email
 	invitation.Status = "signed_up"
 	invitation.SignedUpAt = &now
-
 	if err := uc.invitationRepo.Update(invitation); err != nil {
 		return nil, errors.NewInternalServerError("Failed to update invitation")
 	}
@@ -266,7 +293,7 @@ func (uc *studentSignUpUseCase) InitiateStudentSignUp(req *dto.StudentSignUpRequ
 		InvitationID: invitation.ID,
 		Email:        req.Email,
 		Message:      "Sign up initiated successfully",
-		NextStep:     "payment", // Next step is to process payment
+		NextStep:     "payment",
 	}, nil
 }
 
@@ -405,7 +432,7 @@ func (uc *studentSignUpUseCase) CreateSupabaseUser(email, password, fullName, in
 // Helper functions
 
 func (uc *studentSignUpUseCase) invitationToDTO(invitation *models.StudentInvitation) *dto.InvitationResponse {
-	inviteLink := fmt.Sprintf("%s/signup?code=%s", getBaseURL(), invitation.InviteCode)
+	inviteLink := fmt.Sprintf("%s/checkout?code=%s", getBaseURL(), invitation.InviteCode)
 
 	resp := &dto.InvitationResponse{
 		ID:         invitation.ID,
@@ -456,7 +483,7 @@ func getBaseURL() string {
 // CreateCheckoutSession creates a Stripe Checkout Session (subscription mode) for the student invite flow.
 func (uc *studentSignUpUseCase) CreateCheckoutSession(req *dto.CreateCheckoutSessionRequest) (*dto.CheckoutSessionResponse, error) {
 	if uc.stripeSecretKey == "" {
-		return nil, errors.NewInternalServerError("Stripe not configured")
+		return nil, errors.NewInternalServerError("Stripe not configured: set STRIPE_SECRET_KEY (or STRIPE_SECRET/STRIPE_API_KEY) in backend environment")
 	}
 
 	validation, err := uc.ValidateInviteCode(req.InviteCode)
@@ -507,6 +534,11 @@ func (uc *studentSignUpUseCase) CreateCheckoutSession(req *dto.CreateCheckoutSes
 			"mentor_id":   validation.MentorID,
 			"product_id":  validation.ProductID,
 		},
+	}
+
+	// Pre-fill student email in the Stripe form
+	if inv, err2 := uc.invitationRepo.GetByInviteCode(req.InviteCode); err2 == nil && inv != nil && inv.StudentEmail != nil {
+		params.CustomerEmail = stripe.String(*inv.StudentEmail)
 	}
 
 	session, err := checkoutsession.New(params)
@@ -578,7 +610,14 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 	existingAuth, _ := uc.invitationRepo.GetStudentAuthByEmail(req.StudentEmail)
 	if existingAuth == nil && uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
 		tempPassword, _ := generateTempPassword()
-		authUser, err := uc.supabaseAdmin.CreateAuthUser(req.StudentEmail, tempPassword)
+		userMetadata := map[string]interface{}{
+			"role":          "aluno",
+			"mentor_id":     invitation.MentorID,
+			"product_id":    invitation.ProductID,
+			"invitation_id": invitation.ID,
+			"signup_method": "student_invitation",
+		}
+		authUser, err := uc.supabaseAdmin.CreateAuthUserWithMetadata(req.StudentEmail, tempPassword, userMetadata)
 		if err == nil {
 			studentAuth := &models.StudentAuth{
 				StudentEmail:   req.StudentEmail,

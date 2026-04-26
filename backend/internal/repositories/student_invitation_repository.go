@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"gorm.io/gorm"
@@ -99,7 +100,27 @@ func (r *studentInvitationRepository) GetByMentorID(mentorID string, page, pageS
 }
 
 func (r *studentInvitationRepository) Update(entity *models.StudentInvitation) error {
-	return r.db.Save(entity).Error
+	updates := map[string]interface{}{}
+	addIfColumnExists := func(column string, value interface{}) {
+		if r.db.Migrator().HasColumn(&models.StudentInvitation{}, column) {
+			updates[column] = value
+		}
+	}
+
+	addIfColumnExists("mentor_id", entity.MentorID)
+	addIfColumnExists("product_id", entity.ProductID)
+	addIfColumnExists("invite_code", entity.InviteCode)
+	addIfColumnExists("student_email", entity.StudentEmail)
+	addIfColumnExists("status", entity.Status)
+	addIfColumnExists("invited_email", entity.InvitedEmail)
+	addIfColumnExists("invited_name", entity.InvitedName)
+	addIfColumnExists("expires_at", entity.ExpiresAt)
+	addIfColumnExists("signed_up_at", entity.SignedUpAt)
+	addIfColumnExists("activated_at", entity.ActivatedAt)
+	addIfColumnExists("payment_id", entity.PaymentID)
+	addIfColumnExists("updated_at", entity.UpdatedAt)
+
+	return r.db.Model(&models.StudentInvitation{}).Where("id = ?", entity.ID).Updates(updates).Error
 }
 
 func (r *studentInvitationRepository) Delete(id string) error {
@@ -109,12 +130,20 @@ func (r *studentInvitationRepository) Delete(id string) error {
 // ============= StudentAuth Operations =============
 
 func (r *studentInvitationRepository) CreateStudentAuth(entity *models.StudentAuth) error {
-	return r.db.Create(entity).Error
+	err := r.db.Create(entity).Error
+	if isMissingStudentAuthTableErr(err) {
+		// Backward compatibility: some environments may not have student_auth yet.
+		return nil
+	}
+	return err
 }
 
 func (r *studentInvitationRepository) GetStudentAuthByEmail(email string) (*models.StudentAuth, error) {
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "student_email = ?", email).Error; err != nil {
+		if isMissingStudentAuthTableErr(err) {
+			return nil, nil
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -126,6 +155,9 @@ func (r *studentInvitationRepository) GetStudentAuthByEmail(email string) (*mode
 func (r *studentInvitationRepository) GetStudentAuthBySupabaseID(supabaseID string) (*models.StudentAuth, error) {
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "supabase_user_id = ?", supabaseID).Error; err != nil {
+		if isMissingStudentAuthTableErr(err) {
+			return nil, nil
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -137,6 +169,9 @@ func (r *studentInvitationRepository) GetStudentAuthBySupabaseID(supabaseID stri
 func (r *studentInvitationRepository) GetStudentAuthByInvitationID(invitationID string) (*models.StudentAuth, error) {
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "invitation_id = ?", invitationID).Error; err != nil {
+		if isMissingStudentAuthTableErr(err) {
+			return nil, nil
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -146,5 +181,19 @@ func (r *studentInvitationRepository) GetStudentAuthByInvitationID(invitationID 
 }
 
 func (r *studentInvitationRepository) UpdateStudentAuth(entity *models.StudentAuth) error {
-	return r.db.Save(entity).Error
+	err := r.db.Save(entity).Error
+	if isMissingStudentAuthTableErr(err) {
+		// Backward compatibility: some environments may not have student_auth yet.
+		return nil
+	}
+	return err
+}
+
+func isMissingStudentAuthTableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "student_auth") &&
+		(strings.Contains(msg, "does not exist") || strings.Contains(msg, "sqlstate 42p01"))
 }

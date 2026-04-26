@@ -10,6 +10,7 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/usecases"
 	appauth "github.com/approva-cards/back-aprova-cards/pkg/auth"
 	"github.com/approva-cards/back-aprova-cards/pkg/middleware"
+	aiclient "github.com/approva-cards/back-aprova-cards/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -81,7 +82,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	// ---- Auth (public, stricter rate limit: 5 req / 5 min) ----
 	authLimiter := middleware.NewRateLimiter(5, 300)
 	mentorRepo := repositories.NewMentorRepository(db)
-	authUC := usecases.NewAuthUseCase(mentorRepo, cfg.Admin.Email, cfg.Admin.Password)
+	authUC := usecases.NewAuthUseCase(mentorRepo, db, cfg.Admin.Email, cfg.Admin.Password)
 	authHandler := handlers.NewAuthHandler(authUC, cfg.JWT.Secret, cfg.JWT.Expiration)
 	adminMentorUC := usecases.NewAdminMentorUseCase(db, supabaseAdminClient)
 
@@ -89,6 +90,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	authGroup.Use(middleware.RateLimitByIP(authLimiter))
 	{
 		authGroup.POST("/admin-login", authHandler.AdminLogin)
+		authGroup.POST("/validate-student-access", authHandler.ValidateStudentPortalAccess)
 	}
 	api.POST("/admin/mentors/provision", handlers.NewMentorHandler(usecases.NewMentorUseCase(mentorRepo), adminMentorUC, supabaseAdminClient).CreateProvisioned)
 
@@ -109,6 +111,15 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.PUT("/admin/disciplines/:id", discHandlerAdmin.Update)
 	api.DELETE("/admin/disciplines/:id", discHandlerAdmin.Delete)
 	api.POST("/admin/disciplines/:id/reorder", discHandlerAdmin.Reorder)
+
+	// ---- AI Card Generation (public admin route, requires OPENAI_API_KEY) ----
+	openaiCli := aiclient.NewClient(cfg.OpenAI.APIKey)
+	aiCardRepo := repositories.NewCardRepository(db)
+	aiDiscRepo := repositories.NewDisciplineRepository(db)
+	aiCardUC := usecases.NewCardUseCase(aiCardRepo, aiDiscRepo, openaiCli)
+	aiCardHandler := handlers.NewCardHandler(aiCardUC)
+	api.GET("/admin/products/:id/cards", aiCardHandler.GetByProductID)
+	api.POST("/admin/disciplines/:id/generate-ai", aiCardHandler.GenerateWithAI)
 
 	healthCheckHandler := handlers.NewHealthCheckHandler(db)
 	api.GET("/admin/health-check", healthCheckHandler.Check)

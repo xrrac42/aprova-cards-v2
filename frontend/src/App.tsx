@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-r
 import ErrorBoundary from "@/components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
 import { PaymentCheckout } from "./components/PaymentCheckout";
+import { StudentSignUpFlow } from "./components/StudentSignUpFlow";
 
 // Lazy load all non-login routes
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -46,6 +47,11 @@ const LazyFallback = () => (
 const CheckoutRoute = () => {
   const [searchParams] = useSearchParams();
 
+  // Invite-code flow: /checkout?code=xxx
+  if (searchParams.get("code")) {
+    return <StudentSignUpFlow />;
+  }
+
   const studentEmail = searchParams.get("studentEmail");
   const productId = searchParams.get("productId");
   const amountCentsParam = searchParams.get("amountCents");
@@ -74,8 +80,7 @@ const App = () => (
         <Suspense fallback={<LazyFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/login/:slug" element={<LoginPage />} />
+          <Route path="/login/:slug?" element={<LoginPage />} />
 
           {/* Admin */}
           <Route path="/admin" element={<AdminDashboard />} />
@@ -93,6 +98,7 @@ const App = () => (
           <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
           <Route path="/admin/personalizacao" element={<Customization />} />
           <Route path="/checkout" element={<CheckoutRoute />} />
+          <Route path="/convite" element={<StudentSignUpFlow />} />
 
           {/* Student — StudySession gets its own Suspense to prevent remounts */}
           <Route path="/aluno" element={<StudentHome />} />

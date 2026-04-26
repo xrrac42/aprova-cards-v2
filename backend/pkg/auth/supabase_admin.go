@@ -23,9 +23,10 @@ type SupabaseUser struct {
 }
 
 type createUserRequest struct {
-	Email        string `json:"email"`
-	Password     string `json:"password"`
-	EmailConfirm bool   `json:"email_confirm"`
+	Email        string                 `json:"email"`
+	Password     string                 `json:"password"`
+	EmailConfirm bool                   `json:"email_confirm"`
+	UserMetadata map[string]interface{} `json:"user_metadata,omitempty"`
 }
 
 type createUserResponse struct {
@@ -68,11 +69,20 @@ func (c *SupabaseAdminClient) ConfigDiagnostic() string {
 }
 
 func (c *SupabaseAdminClient) CreateAuthUser(email, password string) (*SupabaseUser, error) {
+	return c.CreateAuthUserWithMetadata(email, password, nil)
+}
+
+func (c *SupabaseAdminClient) CreateAuthUserWithMetadata(email, password string, userMetadata map[string]interface{}) (*SupabaseUser, error) {
 	if !c.IsConfigured() {
 		return nil, fmt.Errorf("supabase admin client not configured")
 	}
 
-	payload := createUserRequest{Email: strings.ToLower(strings.TrimSpace(email)), Password: password, EmailConfirm: true}
+	payload := createUserRequest{
+		Email:        strings.ToLower(strings.TrimSpace(email)),
+		Password:     password,
+		EmailConfirm: true,
+		UserMetadata: userMetadata,
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

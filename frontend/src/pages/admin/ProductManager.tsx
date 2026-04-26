@@ -3,10 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
 import { sanitizeCardFields } from '@/lib/html-entities';
-import { parseFileWithFormat, validateCards, type ParsedCard } from '@/lib/csv-parser';
 import CardContent from '@/components/CardContent';
-import { ArrowLeft, Plus, Trash2, Upload, Search, Edit, BookOpen, CreditCard, X, Check, Loader2, GripVertical, ChevronDown, ChevronRight, Download, AlertTriangle, Settings, ImageIcon, Copy } from 'lucide-react';
-import CloneDisciplineModal from '@/components/CloneDisciplineModal';
+import { ArrowLeft, Plus, Trash2, Search, Edit, BookOpen, CreditCard, Loader2, GripVertical, ChevronDown, ChevronRight, Download, AlertTriangle, Settings, ImageIcon, Copy } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -19,7 +17,7 @@ const ProductManager: React.FC = () => {
   const session = getSession();
 
   const [product, setProduct] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'disciplines' | 'upload' | 'cards'>('disciplines');
+  const [activeTab, setActiveTab] = useState<'disciplines' | 'cards'>('disciplines');
   const [disciplines, setDisciplines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalCardCount, setTotalCardCount] = useState(0);
@@ -30,17 +28,6 @@ const ProductManager: React.FC = () => {
   const [disciplineName, setDisciplineName] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  // Upload state
-  const [uploadDisciplineId, setUploadDisciplineId] = useState('');
-  const [parsedCards, setParsedCards] = useState<ParsedCard[]>([]);
-  const [invalidCards, setInvalidCards] = useState<ParsedCard[]>([]);
-  const [totalParsed, setTotalParsed] = useState(0);
-  const [uploadMsg, setUploadMsg] = useState('');
-  const [uploadLog, setUploadLog] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadingApkg, setUploadingApkg] = useState(false);
-  const [showInvalid, setShowInvalid] = useState(false);
 
   // Cards tab: server-side pagination per discipline
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,7 +42,6 @@ const ProductManager: React.FC = () => {
   const [editingCard, setEditingCard] = useState<any>(null);
   const [cardFront, setCardFront] = useState('');
   const [cardBack, setCardBack] = useState('');
-  const [showCloneModal, setShowCloneModal] = useState(false);
 
   useEffect(() => {
     if (!session || session.role !== 'admin') { navigate('/login'); return; }
@@ -99,25 +85,33 @@ const ProductManager: React.FC = () => {
         const respData = await resp.json();
         const discs = respData?.data || [];
 
-        // Fetch card counts for each discipline
+        // Fetch card counts for each discipline from backend API
         const disciplinesWithCount = await Promise.all(
           (discs || []).map(async (d: any) => {
-            const { count } = await supabase
-              .from('cards')
-              .select('*', { count: 'exact', head: true })
-              .eq('discipline_id', d.id);
-            return { ...d, card_count: count || 0 };
+            const countResp = await fetch(
+              `${backendURL}/api/v1/admin/products/${productId}/cards?page=1&page_size=1&discipline_id=${encodeURIComponent(d.id)}`
+            );
+            if (!countResp.ok) {
+              const bodyText = await countResp.text();
+              console.error('[cards count]', d.id, bodyText || countResp.statusText);
+              return { ...d, card_count: 0 };
+            }
+            const countPayload = await countResp.json();
+            return { ...d, card_count: countPayload?.data?.total || 0 };
           })
         );
         setDisciplines(disciplinesWithCount);
 
-        // Fetch total card count
-        const { count, error: countErr } = await supabase
-          .from('cards')
-          .select('*', { count: 'exact', head: true })
-          .eq('product_id', productId);
-        if (countErr) throw countErr;
-        setTotalCardCount(count || 0);
+        // Fetch total card count from backend API
+        const totalResp = await fetch(
+          `${backendURL}/api/v1/admin/products/${productId}/cards?page=1&page_size=1`
+        );
+        if (!totalResp.ok) {
+          const bodyText = await totalResp.text();
+          throw new Error(`Erro ao carregar total de cards (${totalResp.status}): ${bodyText || 'sem detalhe'}`);
+        }
+        const totalPayload = await totalResp.json();
+        setTotalCardCount(totalPayload?.data?.total || 0);
       } catch (err: any) {
         toast.error(`Erro ao carregar disciplinas: ${err?.message || 'erro desconhecido'}`);
       } finally {
@@ -126,28 +120,53 @@ const ProductManager: React.FC = () => {
     };
 
   const loadCardsPage = async () => {
+    if (!productId) {
+      setPaginatedCards([]);
+      setFilteredCardCount(0);
+      return;
+    }
+
     setCardsLoading(true);
     const from = cardsPage * CARDS_PAGE_SIZE;
     const to = from + CARDS_PAGE_SIZE - 1;
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
-    let query = supabase
-      .from('cards')
-      .select('id, front, back, discipline_id, disciplines(name)', { count: 'exact' })
-      .eq('product_id', productId)
-      .order('order')
-      .range(from, to);
+    try {
+      const params = new URLSearchParams({
+        page: String(cardsPage + 1),
+        page_size: String(CARDS_PAGE_SIZE),
+      });
+      if (selectedDisciplineId) params.set('discipline_id', selectedDisciplineId);
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
-    if (selectedDisciplineId) {
-      query = query.eq('discipline_id', selectedDisciplineId);
+      let cards: any[] = [];
+      let total = 0;
+
+      const resp = await fetch(`${backendURL}/api/v1/admin/products/${productId}/cards?${params.toString()}`);
+      if (!resp.ok) {
+        const bodyText = await resp.text();
+        throw new Error(`Erro ao carregar cards (${resp.status}): ${bodyText || 'sem detalhe'}`);
+      }
+      const payload = await resp.json();
+      cards = payload?.data?.data || [];
+      total = payload?.data?.total || 0;
+
+      // Resolve discipline name from already-loaded disciplines list
+      const enriched = cards.map((c: any) => ({
+        ...c,
+        disciplines: { name: disciplines.find(d => d.id === c.discipline_id)?.name ?? '' },
+      }));
+
+      setPaginatedCards(enriched);
+      setFilteredCardCount(total);
+    } catch (err: any) {
+      console.error('[cards list]', err);
+      toast.error(`Erro ao carregar cards: ${err?.message || 'erro desconhecido'}`);
+      setPaginatedCards([]);
+      setFilteredCardCount(0);
+    } finally {
+      setCardsLoading(false);
     }
-    if (searchQuery) {
-      query = query.or(`front.ilike.%${searchQuery}%,back.ilike.%${searchQuery}%`);
-    }
-
-    const { data, count } = await query;
-    setPaginatedCards(data || []);
-    setFilteredCardCount(count || 0);
-    setCardsLoading(false);
   };
 
   const getDiscCardCount = (disc: any) => {
@@ -289,106 +308,6 @@ const ProductManager: React.FC = () => {
     loadDisciplines();
   };
 
-  // Upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadingApkg(true);
-    setUploadMsg('Processando arquivo...');
-    setUploadLog('');
-    setParsedCards([]);
-    setInvalidCards([]);
-    setTotalParsed(0);
-    setShowInvalid(false);
-
-    try {
-      const { cards: parsed, format } = await parseFileWithFormat(file);
-      const { valid, invalidCount, invalidCards: inv } = validateCards(parsed);
-      setTotalParsed(parsed.length);
-      setInvalidCards(inv);
-
-      if (valid.length === 0) {
-        setUploadMsg(`⚠️ Nenhum card válido encontrado. ${invalidCount > 0 ? `${invalidCount} card(s) ignorado(s) por estarem incompletos.` : 'Verifique o formato do arquivo.'}`);
-      } else {
-        setParsedCards(valid);
-        setUploadMsg(`Formato detectado: ${format} — ${valid.length} card(s) válido(s)${invalidCount > 0 ? ` · ${invalidCount} ignorado(s) (incompletos)` : ''}`);
-      }
-    } catch (err: any) {
-      setUploadMsg(`❌ Erro ao processar: ${err.message}`);
-      setParsedCards([]);
-    } finally {
-      setUploadingApkg(false);
-    }
-  };
-
-  const confirmUpload = async () => {
-    if (parsedCards.length === 0 || !uploadDisciplineId) return;
-    setUploading(true);
-
-    // Deduplicate against existing cards in the discipline
-    const { data: existing } = await supabase
-      .from('cards')
-      .select('front')
-      .eq('discipline_id', uploadDisciplineId);
-
-    const existingFronts = new Set(
-      existing?.map(c => c.front.toLowerCase().trim()) || []
-    );
-
-    const seenFronts = new Set<string>();
-    const uniqueCards: typeof parsedCards = [];
-    let duplicateCount = 0;
-
-    parsedCards.forEach(c => {
-      const key = c.front.toLowerCase().trim();
-      if (existingFronts.has(key) || seenFronts.has(key)) {
-        duplicateCount++;
-      } else {
-        uniqueCards.push(c);
-        seenFronts.add(key);
-      }
-    });
-
-    const cardsToInsert = uniqueCards.map((c, i) => {
-      const sanitized = sanitizeCardFields(c);
-      return {
-        discipline_id: uploadDisciplineId,
-        product_id: productId!,
-        front: sanitized.front,
-        back: sanitized.back,
-        order: i,
-      };
-    });
-
-    if (cardsToInsert.length > 0) {
-      await supabase.from('cards').insert(cardsToInsert);
-    }
-
-    const { count } = await supabase
-      .from('cards')
-      .select('*', { count: 'exact', head: true })
-      .eq('discipline_id', uploadDisciplineId);
-
-    const discName = disciplines.find(d => d.id === uploadDisciplineId)?.name || 'Desconhecida';
-    const now = new Date().toLocaleString('pt-BR');
-
-    setUploadLog(
-      `✅ Upload concluído — ${now}\n` +
-      `Disciplina: ${discName} (${count ?? '?'} cards no total)\n` +
-      `Total no arquivo: ${totalParsed} cards\n` +
-      `Válidos importados: ${cardsToInsert.length} cards\n` +
-      `Ignorados (incompletos): ${invalidCards.length} cards` +
-      (duplicateCount > 0 ? `\nIgnorados (duplicados): ${duplicateCount} cards` : '')
-    );
-
-    setParsedCards([]);
-    setInvalidCards([]);
-    setUploadMsg('');
-    setUploading(false);
-    loadDisciplines();
-  };
-
   // Card CRUD
   const saveCard = async () => {
     if (!editingCard) return;
@@ -421,7 +340,6 @@ const ProductManager: React.FC = () => {
 
   const tabs = [
     { key: 'disciplines' as const, label: 'Disciplinas', icon: BookOpen },
-    { key: 'upload' as const, label: 'Upload', icon: Upload },
     { key: 'cards' as const, label: 'Cards', icon: CreditCard },
   ];
 
@@ -507,139 +425,9 @@ const ProductManager: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
               </div>
             ))}
-          </div>
-        )}
-
-        {/* UPLOAD TAB */}
-        {activeTab === 'upload' && (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <h3 className="mb-4 font-display font-semibold text-foreground">Upload de Cards</h3>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-foreground">Disciplina</label>
-                  <select value={uploadDisciplineId} onChange={(e) => setUploadDisciplineId(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors">
-                    <option value="">Selecione</option>
-                    {disciplines.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-foreground">Arquivo (CSV, TXT, JSON, APKG)</label>
-                  <input
-                    type="file"
-                    accept=".csv,.json,.txt,.apkg"
-                    onChange={handleFileUpload}
-                    disabled={uploadingApkg}
-                    className="w-full text-sm text-muted-foreground file:mr-4 file:rounded-lg file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-foreground file:cursor-pointer disabled:opacity-50"
-                  />
-                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    <p>• <strong>CSV:</strong> frente;verso (uma por linha)</p>
-                    <p>• <strong>TXT:</strong> frente;verso ou frente / verso (separados por linha em branco)</p>
-                    <p>• <strong>GPT:</strong> frente ||| verso ||| tags (tags são ignoradas)</p>
-                    <p>• <strong>JSON:</strong> {`[{"frente": "...", "verso": "..."}]`}</p>
-                    <p>• <strong>APKG:</strong> exportação do Anki</p>
-                  </div>
-
-                  {uploadDisciplineId && (
-                    <button
-                      onClick={() => setShowCloneModal(true)}
-                      className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-surface-hover transition-colors"
-                    >
-                      <Copy className="h-4 w-4" />
-                      Clonar de outro produto
-                    </button>
-                  )}
-                </div>
-
-                {uploadingApkg && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Processando arquivo...
-                  </div>
-                )}
-
-                {uploadMsg && (
-                  <p className={`rounded-lg px-3 py-2 text-sm ${
-                    uploadMsg.startsWith('✅') ? 'bg-secondary/10 text-secondary' :
-                    uploadMsg.startsWith('❌') ? 'bg-destructive/10 text-destructive' :
-                    uploadMsg.startsWith('⚠️') ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400' :
-                    'text-muted-foreground'
-                  }`}>{uploadMsg}</p>
-                )}
-
-                {parsedCards.length > 0 && (
-                  <>
-                    <div>
-                      <p className="mb-2 text-sm font-medium text-foreground">
-                        Pré-visualização (primeiros {Math.min(5, parsedCards.length)} de {parsedCards.length} cards válidos):
-                      </p>
-                      <div className="space-y-2 rounded-xl border border-border bg-surface-secondary p-3">
-                        {parsedCards.slice(0, 5).map((c, i) => (
-                          <div key={i} className="rounded-lg bg-surface p-3 text-sm">
-                            <p className="font-medium text-foreground">
-                              <span className="mr-2 text-xs text-muted-foreground">Frente:</span><CardContent text={c.front} />
-                            </p>
-                            <p className="mt-1 text-muted-foreground">
-                              <span className="mr-2 text-xs">Verso:</span><CardContent text={c.back} />
-                            </p>
-                          </div>
-                        ))}
-                        {parsedCards.length > 5 && (
-                          <p className="text-center text-xs text-muted-foreground">... e mais {parsedCards.length - 5} cards</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {invalidCards.length > 0 && (
-                      <div>
-                        <button onClick={() => setShowInvalid(!showInvalid)}
-                          className="flex items-center gap-2 text-sm text-yellow-600 dark:text-yellow-400 hover:underline">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          {invalidCards.length} card(s) ignorado(s) — {showInvalid ? 'ocultar' : 'ver detalhes'}
-                        </button>
-                        {showInvalid && (
-                          <div className="mt-2 space-y-2 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-3">
-                            {invalidCards.slice(0, 10).map((c, i) => (
-                              <div key={i} className="rounded-lg bg-surface p-3 text-sm">
-                                <p className="text-foreground"><span className="mr-2 text-xs text-muted-foreground">Frente:</span>{c.front || <span className="italic text-muted-foreground">(vazio)</span>}</p>
-                                <p className="mt-1 text-muted-foreground"><span className="mr-2 text-xs">Verso:</span>{c.back || <span className="italic text-muted-foreground">(vazio)</span>}</p>
-                              </div>
-                            ))}
-                            {invalidCards.length > 10 && <p className="text-center text-xs text-muted-foreground">... e mais {invalidCards.length - 10}</p>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex gap-3">
-                      <button
-                        onClick={confirmUpload}
-                        disabled={uploading || !uploadDisciplineId}
-                        className="flex items-center gap-2 rounded-xl bg-secondary px-6 py-2.5 font-medium text-secondary-foreground transition-all hover:opacity-90 disabled:opacity-50"
-                      >
-                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                        Confirmar importação ({parsedCards.length} cards)
-                      </button>
-                      <button onClick={() => { setParsedCards([]); setInvalidCards([]); setUploadMsg(''); setUploadLog(''); }}
-                        className="flex items-center gap-2 rounded-xl border border-border px-6 py-2.5 font-medium text-foreground transition-colors hover:bg-surface-hover">
-                        <X className="h-4 w-4" /> Cancelar
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {uploadLog && (
-                  <div className="rounded-xl border border-secondary/30 bg-secondary/5 p-4">
-                    <pre className="whitespace-pre-wrap text-sm text-foreground">{uploadLog}</pre>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
@@ -826,16 +614,6 @@ const ProductManager: React.FC = () => {
         </div>
       )}
 
-      {/* Clone Modal */}
-      {showCloneModal && uploadDisciplineId && (
-        <CloneDisciplineModal
-          productId={productId!}
-          disciplineId={uploadDisciplineId}
-          disciplineName={disciplines.find(d => d.id === uploadDisciplineId)?.name || ''}
-          onClose={() => setShowCloneModal(false)}
-          onComplete={() => loadDisciplines()}
-        />
-      )}
     </div>
   );
 };

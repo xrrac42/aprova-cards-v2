@@ -130,6 +130,10 @@ func (r *studentInvitationRepository) Delete(id string) error {
 // ============= StudentAuth Operations =============
 
 func (r *studentInvitationRepository) CreateStudentAuth(entity *models.StudentAuth) error {
+	if !r.db.Migrator().HasTable(&models.StudentAuth{}) {
+		// Backward compatibility: some environments may not have student_auth yet.
+		return nil
+	}
 	err := r.db.Create(entity).Error
 	if isMissingStudentAuthTableErr(err) {
 		// Backward compatibility: some environments may not have student_auth yet.
@@ -139,6 +143,9 @@ func (r *studentInvitationRepository) CreateStudentAuth(entity *models.StudentAu
 }
 
 func (r *studentInvitationRepository) GetStudentAuthByEmail(email string) (*models.StudentAuth, error) {
+	if !r.db.Migrator().HasTable(&models.StudentAuth{}) {
+		return nil, nil
+	}
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "student_email = ?", email).Error; err != nil {
 		if isMissingStudentAuthTableErr(err) {
@@ -153,6 +160,9 @@ func (r *studentInvitationRepository) GetStudentAuthByEmail(email string) (*mode
 }
 
 func (r *studentInvitationRepository) GetStudentAuthBySupabaseID(supabaseID string) (*models.StudentAuth, error) {
+	if !r.db.Migrator().HasTable(&models.StudentAuth{}) {
+		return nil, nil
+	}
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "supabase_user_id = ?", supabaseID).Error; err != nil {
 		if isMissingStudentAuthTableErr(err) {
@@ -167,6 +177,9 @@ func (r *studentInvitationRepository) GetStudentAuthBySupabaseID(supabaseID stri
 }
 
 func (r *studentInvitationRepository) GetStudentAuthByInvitationID(invitationID string) (*models.StudentAuth, error) {
+	if !r.db.Migrator().HasTable(&models.StudentAuth{}) {
+		return nil, nil
+	}
 	var auth models.StudentAuth
 	if err := r.db.First(&auth, "invitation_id = ?", invitationID).Error; err != nil {
 		if isMissingStudentAuthTableErr(err) {
@@ -181,6 +194,10 @@ func (r *studentInvitationRepository) GetStudentAuthByInvitationID(invitationID 
 }
 
 func (r *studentInvitationRepository) UpdateStudentAuth(entity *models.StudentAuth) error {
+	if !r.db.Migrator().HasTable(&models.StudentAuth{}) {
+		// Backward compatibility: some environments may not have student_auth yet.
+		return nil
+	}
 	err := r.db.Save(entity).Error
 	if isMissingStudentAuthTableErr(err) {
 		// Backward compatibility: some environments may not have student_auth yet.

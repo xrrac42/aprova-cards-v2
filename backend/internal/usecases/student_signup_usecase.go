@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
@@ -542,10 +543,22 @@ func (uc *studentSignUpUseCase) CreateCheckoutSession(req *dto.CreateCheckoutSes
 		},
 	}
 
-	// Pre-fill student email in the Stripe form
-	if inv, err2 := uc.invitationRepo.GetByInviteCode(req.InviteCode); err2 == nil && inv != nil && inv.StudentEmail != nil {
-		params.CustomerEmail = stripe.String(*inv.StudentEmail)
-		params.Metadata["student_email"] = *inv.StudentEmail
+	// Pre-fill email from the account created in invite signup.
+	if inv, err2 := uc.invitationRepo.GetByInviteCode(req.InviteCode); err2 == nil && inv != nil {
+		canonicalEmail := ""
+		if authByInvitation, err3 := uc.invitationRepo.GetStudentAuthByInvitationID(inv.ID); err3 == nil && authByInvitation != nil {
+			canonicalEmail = strings.TrimSpace(authByInvitation.StudentEmail)
+		}
+		if canonicalEmail == "" && inv.StudentEmail != nil {
+			canonicalEmail = strings.TrimSpace(*inv.StudentEmail)
+		}
+		if canonicalEmail == "" && inv.InvitedEmail != nil {
+			canonicalEmail = strings.TrimSpace(*inv.InvitedEmail)
+		}
+		if canonicalEmail != "" {
+			params.CustomerEmail = stripe.String(canonicalEmail)
+			params.Metadata["student_email"] = canonicalEmail
+		}
 	}
 
 	session, err := checkoutsession.New(params)
@@ -571,14 +584,40 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 		return fmt.Errorf("invitation not found for code %s", req.InviteCode)
 	}
 
-	// Canonical email for granting access is invitation email (if present),
-	// not the email typed during Stripe checkout.
-	activationEmail := req.StudentEmail
-	if invitation.StudentEmail != nil && *invitation.StudentEmail != "" {
-		activationEmail = *invitation.StudentEmail
+	// Canonical email MUST come from invite signup account, never from Stripe checkout form.
+	existingAuthByInvitation, err := uc.invitationRepo.GetStudentAuthByInvitationID(invitation.ID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch student auth for invitation: %w", err)
+	}
+
+	activationEmail := ""
+	supabaseUserID := ""
+	if existingAuthByInvitation != nil {
+		activationEmail = strings.TrimSpace(existingAuthByInvitation.StudentEmail)
+		supabaseUserID = strings.TrimSpace(existingAuthByInvitation.SupabaseUserID)
+	}
+
+	// Secondary lookup: handles the case where invitation_id linkage in student_auth is broken
+	// (e.g. missing column migration). req.StudentEmail is the canonical signup email from
+	// checkout metadata — never the Stripe billing email.
+	if activationEmail == "" && req.StudentEmail != "" {
+		if authByEmail, err2 := uc.invitationRepo.GetStudentAuthByEmail(req.StudentEmail); err2 == nil && authByEmail != nil {
+			log.Printf("[activate] student_auth found by email fallback (invitation_id linkage missed): email=%s invitation=%s", req.StudentEmail, invitation.ID)
+			activationEmail = strings.TrimSpace(authByEmail.StudentEmail)
+			supabaseUserID = strings.TrimSpace(authByEmail.SupabaseUserID)
+			existingAuthByInvitation = authByEmail
+		}
+	}
+
+	if activationEmail == "" && invitation.StudentEmail != nil {
+		activationEmail = strings.TrimSpace(*invitation.StudentEmail)
+	}
+	if activationEmail == "" && invitation.InvitedEmail != nil {
+		log.Printf("[activate] WARN: falling back to invited_email for invitation %s — verify student_auth migration", invitation.ID)
+		activationEmail = strings.TrimSpace(*invitation.InvitedEmail)
 	}
 	if activationEmail == "" {
-		return fmt.Errorf("student email not available for invitation %s", invitation.ID)
+		return fmt.Errorf("student signup email not found for invitation %s", invitation.ID)
 	}
 
 	mentor, err := uc.mentorRepo.GetByID(invitation.MentorID)
@@ -626,12 +665,15 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 	}
 
 	// Provision student in Supabase Auth if not already registered.
-	existingAuth, _ := uc.invitationRepo.GetStudentAuthByEmail(activationEmail)
+	existingAuth := existingAuthByInvitation
+	if existingAuth == nil {
+		existingAuth, _ = uc.invitationRepo.GetStudentAuthByEmail(activationEmail)
+	}
 
-	var supabaseUserID string
-	if existingAuth != nil {
+	if existingAuth != nil && supabaseUserID == "" {
 		supabaseUserID = existingAuth.SupabaseUserID
-	} else if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+	}
+	if existingAuth == nil && uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
 		authUser, authErr := uc.supabaseAdmin.InviteUserByEmail(activationEmail)
 		if authErr == nil {
 			supabaseUserID = authUser.ID
@@ -647,29 +689,47 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 	}
 
 	// Ensure user_roles has an entry so the frontend login check passes.
+	// Strategy: UPDATE WHERE (email OR id) first so Supabase-trigger-created rows
+	// (which have empty mentor_id/product_id) get back-filled. INSERT only when no
+	// existing row was found, using ON CONFLICT (email) as the safety net.
 	if supabaseUserID != "" {
 		mentorID := invitation.MentorID
 		productID := invitation.ProductID
-		role := &models.UserRole{
-			ID:        supabaseUserID,
-			Email:     activationEmail,
-			Role:      "aluno",
-			MentorID:  &mentorID,
-			ProductID: &productID,
-			Active:    true,
+
+		updated := uc.db.Model(&models.UserRole{}).
+			Where("id = ? OR email = ?", supabaseUserID, activationEmail).
+			Updates(map[string]interface{}{
+				"mentor_id":  mentorID,
+				"product_id": productID,
+				"role":       "aluno",
+				"active":     true,
+				"updated_at": time.Now(),
+			})
+		if updated.RowsAffected == 0 {
+			role := &models.UserRole{
+				ID:        supabaseUserID,
+				Email:     activationEmail,
+				Role:      "aluno",
+				MentorID:  &mentorID,
+				ProductID: &productID,
+				Active:    true,
+			}
+			if err := uc.db.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "email"}},
+				DoUpdates: clause.AssignmentColumns([]string{"mentor_id", "product_id", "role", "active", "updated_at"}),
+			}).Create(role).Error; err != nil {
+				log.Printf("[activate] user_roles upsert failed (non-fatal): %v", err)
+			}
 		}
-		_ = uc.db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"active", "updated_at"}),
-		}).Create(role).Error
 	}
 
 	// Grant access — idempotent: if a row already exists for this email+product, skip.
 	existingAccess, _ := uc.studentAccessRepo.GetByEmailAndProduct(activationEmail, invitation.ProductID)
 	if existingAccess == nil {
+		mentorIDForAccess := invitation.MentorID
 		access := &models.StudentAccess{
 			Email:        activationEmail,
-			MentorID:     invitation.MentorID,
+			MentorID:     &mentorIDForAccess,
 			ProductID:    invitation.ProductID,
 			Active:       true,
 			InvitationID: &invitation.ID,
@@ -689,7 +749,8 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 		// Payment approved: always reactivate existing access.
 		existingAccess.Active = true
 		existingAccess.InactiveReason = nil
-		existingAccess.MentorID = invitation.MentorID
+		mentorIDUpdate := invitation.MentorID
+		existingAccess.MentorID = &mentorIDUpdate
 		existingAccess.InvitationID = &invitation.ID
 		if (existingAccess.StudentID == nil || *existingAccess.StudentID == "") && supabaseUserID != "" {
 			existingAccess.StudentID = &supabaseUserID

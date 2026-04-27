@@ -8,7 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+// AuthMiddleware validates JWTs signed with the primary secret (admin/mentor tokens)
+// and, optionally, with one or more fallback secrets (e.g. the Supabase project JWT
+// secret used by student Supabase tokens). Add fallbackSecrets via variadic args.
+func AuthMiddleware(jwtSecret string, fallbackSecrets ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if header == "" {
@@ -30,12 +33,23 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 
 		claims, err := auth.ValidateToken(jwtSecret, parts[1])
 		if err != nil {
-			status := http.StatusUnauthorized
+			for _, fs := range fallbackSecrets {
+				if fs == "" {
+					continue
+				}
+				claims, err = auth.ValidateToken(fs, parts[1])
+				if err == nil {
+					break
+				}
+			}
+		}
+
+		if err != nil {
 			msg := "invalid token"
 			if err == auth.ErrExpiredToken {
 				msg = "token expired"
 			}
-			c.AbortWithStatusJSON(status, gin.H{
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"error":   msg,
 			})

@@ -32,3 +32,28 @@ type GenerateCardsResponse struct {
 	Cards     []CardResponse `json:"cards"`
 	Generated int            `json:"generated"`
 }
+
+// Student view DTOs
+type StudentCardResponse struct {
+	ID                   string `json:"id"`
+	DisciplineID         string `json:"discipline_id"`
+	DisciplineName       string `json:"discipline_name"`
+	Front                string `json:"front"`
+	Back                 string `json:"back"`
+	Order                int    `json:"order"`
+	ExistingCorrectCount int    `json:"existing_correct_count"`
+	ExistingIncorrectCount int  `json:"existing_incorrect_count"`
+}
+
+type StudentDisciplineResponse struct {
+	ID    string                `json:"id"`
+	Name  string                `json:"name"`
+	Order int                   `json:"order"`
+	Cards []StudentCardResponse `json:"cards"`
+}
+
+type StudentProductCardsResponse struct {
+	ProductID   string                      `json:"product_id"`
+	Disciplines []StudentDisciplineResponse `json:"disciplines"`
+	TotalCards  int                         `json:"total_cards"`
+}

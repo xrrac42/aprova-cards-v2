@@ -18,6 +18,7 @@ type UserInfo struct {
 }
 
 type StudentPortalAccessResponse struct {
+	Token     string `json:"token"`      // Go-issued JWT para usar nas rotas protegidas
 	MentorID  string `json:"mentor_id"`
 	ProductID string `json:"product_id"`
 	Email     string `json:"email"`

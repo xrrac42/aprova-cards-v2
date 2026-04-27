@@ -6,6 +6,7 @@ export interface Session {
   product_id?: string;
   mentor_id?: string;
   mentor_name?: string;
+  access_token?: string; // JWT token for API requests
 }
 
 export interface Mentor {

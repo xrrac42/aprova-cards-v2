@@ -71,6 +71,7 @@ type RateLimitConfig struct {
 type SupabaseConfig struct {
 	URL            string
 	ServiceRoleKey string
+	JWTSecret      string // project JWT secret — used to validate student Supabase tokens
 }
 
 func Load() *Config {
@@ -108,6 +109,7 @@ func Load() *Config {
 		Supabase: SupabaseConfig{
 			URL:            getEnvFirst([]string{"SUPABASE_URL", "VITE_SUPABASE_URL"}, ""),
 			ServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+			JWTSecret:      getEnv("SUPABASE_JWT_SECRET", ""),
 		},
 		Stripe: StripeConfig{
 			SecretKey:      getEnvFirst([]string{"STRIPE_SECRET_KEY", "STRIPE_SECRET", "STRIPE_API_KEY"}, ""),

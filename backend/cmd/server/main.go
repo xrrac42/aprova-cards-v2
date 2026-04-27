@@ -173,9 +173,21 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.POST("/welcome-email", checkoutHandler.SendWelcomeEmail)
 
 	// ---- Protected routes (JWT required) ----
+	// Supabase JWT secret is a fallback so student tokens (signed by Supabase) are accepted.
 	protected := api.Group("")
-	protected.Use(middleware.AuthMiddleware(cfg.JWT.Secret))
+	protected.Use(middleware.AuthMiddleware(cfg.JWT.Secret, cfg.Supabase.JWTSecret))
 	{
+		// -- Student Cards (student view of their product's cards) --
+		studentCardRepo := repositories.NewCardRepository(db)
+		studentDiscRepo := repositories.NewDisciplineRepository(db)
+		studentProdRepo := repositories.NewProductRepository(db)
+		studentAccRepoCards := repositories.NewStudentAccessRepository(db)
+		studentCardsHandler := handlers.NewStudentCardsHandler(studentCardRepo, studentDiscRepo, studentProdRepo, studentAccRepoCards, db)
+		protected.GET("/student/home", studentCardsHandler.GetStudentHome)
+		protected.GET("/student/cards", studentCardsHandler.GetStudentCards)
+		protected.GET("/student/study-cards", studentCardsHandler.GetStudyCards)
+		protected.GET("/student/debug", studentCardsHandler.DebugStudentAccess)
+
 		// -- Mentors (admin only) --
 		mentorUC := usecases.NewMentorUseCase(mentorRepo)
 		mentorHandler := handlers.NewMentorHandler(mentorUC, adminMentorUC, supabaseAdminClient)

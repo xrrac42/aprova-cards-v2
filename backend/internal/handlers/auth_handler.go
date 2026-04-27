@@ -58,7 +58,7 @@ func (h *AuthHandler) ValidateStudentPortalAccess(c *gin.Context) {
 		return
 	}
 
-	err = h.usecase.ValidateStudentPortalAccess(req.Slug, studentClaims.Sub, studentClaims.Email)
+	portalAccess, err := h.usecase.ValidateStudentPortalAccess(req.Slug, studentClaims.Sub, studentClaims.Email)
 	if err != nil {
 		if appErr, ok := err.(*apperrors.AppError); ok {
 			c.JSON(appErr.Status, dto.APIResponse{Success: false, Error: appErr.Message})
@@ -68,7 +68,7 @@ func (h *AuthHandler) ValidateStudentPortalAccess(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Acesso autorizado."})
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: portalAccess, Message: "Acesso autorizado."})
 }
 
 func extractSupabaseClaims(authorizationHeader string) (*supabaseJWTClaims, error) {

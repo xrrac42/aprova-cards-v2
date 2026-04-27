@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -321,9 +322,14 @@ func (uc *paymentUseCase) HandleStripeWebhook(eventID string, eventType string, 
 	}
 
 	// Convert data to JSON
+	rawData, _ := json.Marshal(data)
+	if len(rawData) == 0 {
+		rawData = []byte("{}")
+	}
 	webhook := &models.PaymentWebhook{
 		StripeEventID: eventID,
 		EventType:     eventType,
+		RawData:       rawData,
 		Processed:     false,
 	}
 

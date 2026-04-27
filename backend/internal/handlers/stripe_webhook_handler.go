@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 
@@ -22,19 +20,17 @@ type StripeWebhookHandler struct {
 }
 
 func NewStripeWebhookHandler(
-	uc usecases.PaymentUseCase,
+	paymentUC usecases.PaymentUseCase,
 	studentSignUpUC usecases.StudentSignUpUseCase,
 ) *StripeWebhookHandler {
 	return &StripeWebhookHandler{
-		paymentUsecase:       uc,
+		paymentUsecase:       paymentUC,
 		studentSignUpUsecase: studentSignUpUC,
 	}
 }
 
-// HandleWebhookEvent handles incoming Stripe webhook events
 // POST /webhooks/stripe
 func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
-	// Get webhook secret from environment
 	endpointSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
 	if endpointSecret == "" {
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
@@ -44,7 +40,6 @@ func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	// Read request body
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
@@ -54,7 +49,6 @@ func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	// Get Stripe signature from header
 	sigHeader := c.GetHeader("Stripe-Signature")
 	if sigHeader == "" {
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
@@ -64,9 +58,11 @@ func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	// Verify webhook signature
-	event, err := webhook.ConstructEvent(body, sigHeader, endpointSecret)
+	event, err := webhook.ConstructEventWithOptions(body, sigHeader, endpointSecret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
+		log.Printf("[webhook] ConstructEvent failed: %v", err)
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
 			Success: false,
 			Error:   "Invalid webhook signature",
@@ -74,50 +70,76 @@ func (h *StripeWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	// Process the webhook event
 	h.processEvent(c, event)
 }
 
-// processEvent processes the webhook event based on its type
 func (h *StripeWebhookHandler) processEvent(c *gin.Context, event stripe.Event) {
 	switch event.Type {
+
 	case "checkout.session.completed":
 		h.handleCheckoutSessionCompleted(c, event)
+
 	case "payment_intent.succeeded":
 		h.handlePaymentIntentSucceeded(c, event)
+
 	case "payment_intent.payment_failed":
 		h.handlePaymentIntentFailed(c, event)
+
 	case "charge.refunded":
 		h.handleChargeRefunded(c, event)
+
 	case "customer.subscription.updated":
 		h.handleSubscriptionUpdated(c, event)
+
 	case "customer.subscription.deleted":
 		h.handleSubscriptionDeleted(c, event)
+
 	default:
-		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Webhook received but not processed"})
+		c.JSON(http.StatusOK, dto.APIResponse{
+			Success: true,
+			Message: "Webhook recebido",
+		})
 	}
 }
 
-// handleCheckoutSessionCompleted activates student access after successful Stripe Checkout.
+// 🔥 CORRIGIDO: fluxo único de checkout
 func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c *gin.Context, event stripe.Event) {
 	var session stripe.CheckoutSession
+
 	if err := json.Unmarshal(event.Data.Raw, &session); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Failed to parse checkout session"})
+		log.Printf("Erro ao parsear checkout session: %v", err)
+		c.JSON(http.StatusBadRequest, dto.APIResponse{
+			Success: false,
+			Error:   "Invalid checkout session",
+		})
+		return
+	}
+
+	if session.Metadata == nil {
+		c.JSON(http.StatusOK, dto.APIResponse{
+			Success: true,
+			Message: "No metadata",
+		})
 		return
 	}
 
 	inviteCode := session.Metadata["invite_code"]
-	if inviteCode == "" {
-		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "No invite_code in metadata"})
-		return
-	}
 
 	studentEmail := ""
-	if session.CustomerDetails != nil {
-		studentEmail = session.CustomerDetails.Email
+	if v, ok := session.Metadata["student_email"]; ok {
+		studentEmail = v
 	}
-	if studentEmail == "" {
-		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "No customer email in session"})
+	if session.CustomerDetails != nil {
+		if studentEmail == "" {
+			studentEmail = session.CustomerDetails.Email
+		}
+	}
+
+	if inviteCode == "" || studentEmail == "" {
+		c.JSON(http.StatusOK, dto.APIResponse{
+			Success: true,
+			Message: "Missing invite_code or email",
+		})
 		return
 	}
 
@@ -136,17 +158,27 @@ func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c *gin.Context, ev
 	}
 
 	if err := h.studentSignUpUsecase.ActivateFromCheckout(req); err != nil {
-		// Return 200 so Stripe does not retry — error is surfaced in the response body.
-		c.JSON(http.StatusOK, dto.APIResponse{Success: false, Message: "Activation failed: " + err.Error()})
+		log.Printf("Erro ao ativar acesso: %v", err)
+
+		// ⚠️ Importante: retorna 200 pra evitar retry infinito
+		c.JSON(http.StatusOK, dto.APIResponse{
+			Success: false,
+			Message: "Activation failed: " + err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Student access activated"})
+	c.JSON(http.StatusOK, dto.APIResponse{
+		Success: true,
+		Message: "Student access activated",
+	})
 }
 
-// handlePaymentIntentSucceeded handles successful payment intents
+// ---------------- PAYMENT ----------------
+
 func (h *StripeWebhookHandler) handlePaymentIntentSucceeded(c *gin.Context, event stripe.Event) {
 	var paymentIntent stripe.PaymentIntent
+
 	if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
 		c.JSON(http.StatusBadRequest, dto.APIResponse{
 			Success: false,
@@ -155,11 +187,10 @@ func (h *StripeWebhookHandler) handlePaymentIntentSucceeded(c *gin.Context, even
 		return
 	}
 
-	// Extract metadata
 	if paymentIntent.Metadata == nil {
 		c.JSON(http.StatusOK, dto.APIResponse{
 			Success: true,
-			Message: "Payment intent succeeded but no metadata",
+			Message: "No metadata",
 		})
 		return
 	}
@@ -169,15 +200,6 @@ func (h *StripeWebhookHandler) handlePaymentIntentSucceeded(c *gin.Context, even
 	inviteCode := paymentIntent.Metadata["invite_code"]
 	fullName := paymentIntent.Metadata["full_name"]
 
-	if studentEmail == "" || productID == "" {
-		c.JSON(http.StatusOK, dto.APIResponse{
-			Success: true,
-			Message: "Payment intent succeeded but missing metadata",
-		})
-		return
-	}
-
-	// Handle the webhook event through the payment usecase
 	err := h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
 		string(event.Type),
@@ -187,58 +209,44 @@ func (h *StripeWebhookHandler) handlePaymentIntentSucceeded(c *gin.Context, even
 			"product_id":     productID,
 		},
 	)
+
 	if err != nil {
-		// Still return 200 to acknowledge webhook receipt
 		c.JSON(http.StatusOK, dto.APIResponse{
 			Success: true,
-			Message: "Webhook processed with error",
+			Message: "Processed with error",
 		})
 		return
 	}
 
-	// If this is a student signup payment (has invite_code), complete the signup
+	// fluxo complementar de signup
 	if inviteCode != "" && h.studentSignUpUsecase != nil {
-		completeReq := &dto.CompleteStudentSignUpRequest{
+		req := &dto.CompleteStudentSignUpRequest{
 			PaymentID:  paymentIntent.ID,
 			InviteCode: inviteCode,
 			Email:      studentEmail,
 			FullName:   fullName,
 		}
 
-		_, err := h.studentSignUpUsecase.CompleteStudentSignUp(completeReq)
-		if err != nil {
-			// Log error but don't fail the webhook response
-			// In a production system, this would be logged and monitored
-		}
+		_, _ = h.studentSignUpUsecase.CompleteStudentSignUp(req)
 	}
 
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
-		Message: "Payment processed successfully",
+		Message: "Payment processed",
 	})
 }
 
-// handlePaymentIntentFailed handles failed payment intents
 func (h *StripeWebhookHandler) handlePaymentIntentFailed(c *gin.Context, event stripe.Event) {
 	var paymentIntent stripe.PaymentIntent
-	if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{
-			Success: false,
-			Error:   "Failed to parse payment intent",
-		})
-		return
-	}
+	_ = json.Unmarshal(event.Data.Raw, &paymentIntent)
 
-	err := h.paymentUsecase.HandleStripeWebhook(
+	_ = h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
 		string(event.Type),
 		map[string]interface{}{
 			"payment_intent": paymentIntent,
 		},
 	)
-	if err != nil {
-		// Log error but still return 200
-	}
 
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
@@ -246,27 +254,17 @@ func (h *StripeWebhookHandler) handlePaymentIntentFailed(c *gin.Context, event s
 	})
 }
 
-// handleChargeRefunded handles refunded charges
 func (h *StripeWebhookHandler) handleChargeRefunded(c *gin.Context, event stripe.Event) {
 	var charge stripe.Charge
-	if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{
-			Success: false,
-			Error:   "Failed to parse charge",
-		})
-		return
-	}
+	_ = json.Unmarshal(event.Data.Raw, &charge)
 
-	err := h.paymentUsecase.HandleStripeWebhook(
+	_ = h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
 		string(event.Type),
 		map[string]interface{}{
 			"charge": charge,
 		},
 	)
-	if err != nil {
-		// Log error but still return 200
-	}
 
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
@@ -274,27 +272,17 @@ func (h *StripeWebhookHandler) handleChargeRefunded(c *gin.Context, event stripe
 	})
 }
 
-// handleSubscriptionUpdated handles subscription updates
 func (h *StripeWebhookHandler) handleSubscriptionUpdated(c *gin.Context, event stripe.Event) {
 	var subscription stripe.Subscription
-	if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{
-			Success: false,
-			Error:   "Failed to parse subscription",
-		})
-		return
-	}
+	_ = json.Unmarshal(event.Data.Raw, &subscription)
 
-	err := h.paymentUsecase.HandleStripeWebhook(
+	_ = h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
 		string(event.Type),
 		map[string]interface{}{
 			"subscription": subscription,
 		},
 	)
-	if err != nil {
-		// Log error but still return 200
-	}
 
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
@@ -302,63 +290,20 @@ func (h *StripeWebhookHandler) handleSubscriptionUpdated(c *gin.Context, event s
 	})
 }
 
-// handleSubscriptionDeleted handles subscription deletions
 func (h *StripeWebhookHandler) handleSubscriptionDeleted(c *gin.Context, event stripe.Event) {
 	var subscription stripe.Subscription
-	if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{
-			Success: false,
-			Error:   "Failed to parse subscription",
-		})
-		return
-	}
+	_ = json.Unmarshal(event.Data.Raw, &subscription)
 
-	err := h.paymentUsecase.HandleStripeWebhook(
+	_ = h.paymentUsecase.HandleStripeWebhook(
 		event.ID,
 		string(event.Type),
 		map[string]interface{}{
 			"subscription": subscription,
 		},
 	)
-	if err != nil {
-		// Log error but still return 200
-	}
 
 	c.JSON(http.StatusOK, dto.APIResponse{
 		Success: true,
 		Message: "Subscription deleted",
-	})
-}
-
-// VerifyWebhookSignature verifies that the webhook came from Stripe
-func VerifyWebhookSignature(payload []byte, signature string, secret string) bool {
-	hash := hmac.New(sha256.New, []byte(secret))
-	hash.Write(payload)
-	expectedSignature := hex.EncodeToString(hash.Sum(nil))
-	return hmac.Equal([]byte(signature), []byte(expectedSignature))
-}
-
-// WebhookTestRequest generates a test webhook request for testing purposes
-func (h *StripeWebhookHandler) WebhookTestRequest(c *gin.Context) {
-	// This endpoint is only for testing - should be removed in production
-	testEvent := map[string]interface{}{
-		"id":   "evt_test_" + string(rune(int64(1))),
-		"type": "payment_intent.succeeded",
-		"data": map[string]interface{}{
-			"object": map[string]interface{}{
-				"id":     "pi_test_123",
-				"status": "succeeded",
-				"metadata": map[string]string{
-					"student_email": "test@example.com",
-					"product_id":    "prod_test_123",
-				},
-			},
-		},
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{
-		Success: true,
-		Data:    testEvent,
-		Message: "Test webhook event",
 	})
 }

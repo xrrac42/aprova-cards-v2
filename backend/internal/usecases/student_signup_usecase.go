@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v79"
 	checkoutsession "github.com/stripe/stripe-go/v79/checkout/session"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type StudentSignUpUseCase interface {
@@ -39,6 +42,7 @@ type StudentSignUpUseCase interface {
 }
 
 type studentSignUpUseCase struct {
+	db                *gorm.DB
 	invitationRepo    repositories.StudentInvitationRepository
 	mentorRepo        repositories.MentorRepository
 	productRepo       repositories.ProductRepository
@@ -51,6 +55,7 @@ type studentSignUpUseCase struct {
 }
 
 func NewStudentSignUpUseCase(
+	db *gorm.DB,
 	invitationRepo repositories.StudentInvitationRepository,
 	mentorRepo repositories.MentorRepository,
 	productRepo repositories.ProductRepository,
@@ -62,6 +67,7 @@ func NewStudentSignUpUseCase(
 	frontendBaseURL string,
 ) StudentSignUpUseCase {
 	return &studentSignUpUseCase{
+		db:                db,
 		invitationRepo:    invitationRepo,
 		mentorRepo:        mentorRepo,
 		productRepo:       productRepo,
@@ -539,6 +545,7 @@ func (uc *studentSignUpUseCase) CreateCheckoutSession(req *dto.CreateCheckoutSes
 	// Pre-fill student email in the Stripe form
 	if inv, err2 := uc.invitationRepo.GetByInviteCode(req.InviteCode); err2 == nil && inv != nil && inv.StudentEmail != nil {
 		params.CustomerEmail = stripe.String(*inv.StudentEmail)
+		params.Metadata["student_email"] = *inv.StudentEmail
 	}
 
 	session, err := checkoutsession.New(params)
@@ -564,6 +571,16 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 		return fmt.Errorf("invitation not found for code %s", req.InviteCode)
 	}
 
+	// Canonical email for granting access is invitation email (if present),
+	// not the email typed during Stripe checkout.
+	activationEmail := req.StudentEmail
+	if invitation.StudentEmail != nil && *invitation.StudentEmail != "" {
+		activationEmail = *invitation.StudentEmail
+	}
+	if activationEmail == "" {
+		return fmt.Errorf("student email not available for invitation %s", invitation.ID)
+	}
+
 	mentor, err := uc.mentorRepo.GetByID(invitation.MentorID)
 	if err != nil || mentor == nil {
 		return fmt.Errorf("failed to fetch mentor: %w", err)
@@ -574,53 +591,52 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 		currency = "brl"
 	}
 
-	// Use Stripe session ID as the payment intent reference for subscriptions.
-	payment := &models.Payment{
-		StudentEmail:          req.StudentEmail,
-		ProductID:             invitation.ProductID,
-		MentorID:              invitation.MentorID,
-		StripePaymentIntentID: req.StripeSessionID,
-		AmountCents:           req.AmountCents,
-		Currency:              currency,
-		Status:                "succeeded",
-	}
-	if req.StripeSubscriptionID != "" {
-		payment.StripeSubscriptionID = &req.StripeSubscriptionID
-	}
-	now := time.Now()
-	payment.SucceededAt = &now
+	// Idempotent payment creation: reuse existing record if the session was already processed.
+	payment, _ := uc.paymentRepo.GetByStripePaymentIntentID(req.StripeSessionID)
+	if payment == nil {
+		now := time.Now()
+		payment = &models.Payment{
+			StudentEmail:          activationEmail,
+			ProductID:             invitation.ProductID,
+			MentorID:              invitation.MentorID,
+			StripePaymentIntentID: req.StripeSessionID,
+			AmountCents:           req.AmountCents,
+			Currency:              currency,
+			Status:                "succeeded",
+			SucceededAt:           &now,
+		}
+		if req.StripeSubscriptionID != "" {
+			payment.StripeSubscriptionID = &req.StripeSubscriptionID
+		}
+		if err := uc.paymentRepo.Create(payment); err != nil {
+			return fmt.Errorf("failed to create payment record: %w", err)
+		}
 
-	if err := uc.paymentRepo.Create(payment); err != nil {
-		return fmt.Errorf("failed to create payment record: %w", err)
-	}
-
-	splitPct := mentor.RevenueShare
-	split := &models.PaymentSplit{
-		PaymentID:         payment.ID,
-		MentorID:          mentor.ID,
-		PlatformFeeCents:  int(float64(payment.AmountCents) * (1 - splitPct/100)),
-		MentorAmountCents: int(float64(payment.AmountCents) * splitPct / 100),
-		SplitPercentage:   splitPct,
-	}
-	if err := uc.paymentRepo.CreateSplit(split); err != nil {
-		return fmt.Errorf("failed to create payment split: %w", err)
+		splitPct := mentor.RevenueShare
+		split := &models.PaymentSplit{
+			PaymentID:         payment.ID,
+			MentorID:          mentor.ID,
+			PlatformFeeCents:  int(float64(payment.AmountCents) * (1 - splitPct/100)),
+			MentorAmountCents: int(float64(payment.AmountCents) * splitPct / 100),
+			SplitPercentage:   splitPct,
+		}
+		if err := uc.paymentRepo.CreateSplit(split); err != nil {
+			return fmt.Errorf("failed to create payment split: %w", err)
+		}
 	}
 
 	// Provision student in Supabase Auth if not already registered.
-	existingAuth, _ := uc.invitationRepo.GetStudentAuthByEmail(req.StudentEmail)
-	if existingAuth == nil && uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
-		tempPassword, _ := generateTempPassword()
-		userMetadata := map[string]interface{}{
-			"role":          "aluno",
-			"mentor_id":     invitation.MentorID,
-			"product_id":    invitation.ProductID,
-			"invitation_id": invitation.ID,
-			"signup_method": "student_invitation",
-		}
-		authUser, err := uc.supabaseAdmin.CreateAuthUserWithMetadata(req.StudentEmail, tempPassword, userMetadata)
-		if err == nil {
+	existingAuth, _ := uc.invitationRepo.GetStudentAuthByEmail(activationEmail)
+
+	var supabaseUserID string
+	if existingAuth != nil {
+		supabaseUserID = existingAuth.SupabaseUserID
+	} else if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+		authUser, authErr := uc.supabaseAdmin.InviteUserByEmail(activationEmail)
+		if authErr == nil {
+			supabaseUserID = authUser.ID
 			studentAuth := &models.StudentAuth{
-				StudentEmail:   req.StudentEmail,
+				StudentEmail:   activationEmail,
 				SupabaseUserID: authUser.ID,
 				InvitationID:   &invitation.ID,
 				MentorID:       invitation.MentorID,
@@ -630,20 +646,62 @@ func (uc *studentSignUpUseCase) ActivateFromCheckout(req *dto.ActivateFromChecko
 		}
 	}
 
+	// Ensure user_roles has an entry so the frontend login check passes.
+	if supabaseUserID != "" {
+		mentorID := invitation.MentorID
+		productID := invitation.ProductID
+		role := &models.UserRole{
+			ID:        supabaseUserID,
+			Email:     activationEmail,
+			Role:      "aluno",
+			MentorID:  &mentorID,
+			ProductID: &productID,
+			Active:    true,
+		}
+		_ = uc.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"active", "updated_at"}),
+		}).Create(role).Error
+	}
+
 	// Grant access — idempotent: if a row already exists for this email+product, skip.
-	existingAccess, _ := uc.studentAccessRepo.GetByEmailAndProduct(req.StudentEmail, invitation.ProductID)
+	existingAccess, _ := uc.studentAccessRepo.GetByEmailAndProduct(activationEmail, invitation.ProductID)
 	if existingAccess == nil {
 		access := &models.StudentAccess{
-			Email:        req.StudentEmail,
+			Email:        activationEmail,
+			MentorID:     invitation.MentorID,
 			ProductID:    invitation.ProductID,
 			Active:       true,
 			InvitationID: &invitation.ID,
 		}
+		if supabaseUserID != "" {
+			access.StudentID = &supabaseUserID
+		}
+		log.Printf("[activate] creating student_access: email=%s mentor=%s product=%s student_id=%v", activationEmail, invitation.MentorID, invitation.ProductID, supabaseUserID)
 		if err := uc.studentAccessRepo.Create(access); err != nil {
+			log.Printf("[activate] student_access CREATE failed: %v", err)
 			return fmt.Errorf("failed to create student access: %w", err)
+		}
+		log.Printf("[activate] student_access created OK")
+	} else {
+		log.Printf("[activate] student_access already exists for %s, skipping create", activationEmail)
+
+		// Payment approved: always reactivate existing access.
+		existingAccess.Active = true
+		existingAccess.InactiveReason = nil
+		existingAccess.MentorID = invitation.MentorID
+		existingAccess.InvitationID = &invitation.ID
+		if (existingAccess.StudentID == nil || *existingAccess.StudentID == "") && supabaseUserID != "" {
+			existingAccess.StudentID = &supabaseUserID
+		}
+
+		if err := uc.studentAccessRepo.Update(existingAccess); err != nil {
+			log.Printf("[activate] student_access UPDATE failed: %v", err)
+			return fmt.Errorf("failed to update student access: %w", err)
 		}
 	}
 
+	now := time.Now()
 	paymentID := payment.ID
 	invitation.Status = "active"
 	invitation.PaymentID = &paymentID

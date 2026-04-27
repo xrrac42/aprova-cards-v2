@@ -16,3 +16,9 @@ type UserInfo struct {
 	Role  string `json:"role"`
 	Name  string `json:"name"`
 }
+
+type StudentPortalAccessResponse struct {
+	MentorID  string `json:"mentor_id"`
+	ProductID string `json:"product_id"`
+	Email     string `json:"email"`
+}

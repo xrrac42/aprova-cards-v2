@@ -18,7 +18,7 @@ func (m *mockMentorRepo) Update(e interface{}) error                   { return 
 func (m *mockMentorRepo) Delete(id string) error                       { return nil }
 
 func TestAdminLogin_Success(t *testing.T) {
-	uc := NewAuthUseCase(nil, nil, "admin@test.com", "secret123")
+	uc := NewAuthUseCase(nil, nil, nil, nil, "admin@test.com", "secret123")
 
 	req := &dto.AdminLoginRequest{Email: "admin@test.com", Password: "secret123"}
 	resp, err := uc.AdminLogin(req, "jwt-secret-key", 3600)
@@ -29,7 +29,7 @@ func TestAdminLogin_Success(t *testing.T) {
 }
 
 func TestAdminLogin_WrongEmail(t *testing.T) {
-	uc := NewAuthUseCase(nil, nil, "admin@test.com", "secret123")
+	uc := NewAuthUseCase(nil, nil, nil, nil, "admin@test.com", "secret123")
 
 	req := &dto.AdminLoginRequest{Email: "wrong@test.com", Password: "secret123"}
 	resp, err := uc.AdminLogin(req, "jwt-secret-key", 3600)
@@ -40,7 +40,7 @@ func TestAdminLogin_WrongEmail(t *testing.T) {
 }
 
 func TestAdminLogin_WrongPassword(t *testing.T) {
-	uc := NewAuthUseCase(nil, nil, "admin@test.com", "secret123")
+	uc := NewAuthUseCase(nil, nil, nil, nil, "admin@test.com", "secret123")
 
 	req := &dto.AdminLoginRequest{Email: "admin@test.com", Password: "wrong"}
 	resp, err := uc.AdminLogin(req, "jwt-secret-key", 3600)

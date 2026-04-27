@@ -257,6 +257,7 @@ export async function login(
     product_id: sessionProductId,
     mentor_id: mentorData?.id,
     mentor_name: mentorData?.name,
+    access_token: accessToken, // Store JWT for API requests
   };
 
   setSession(session);

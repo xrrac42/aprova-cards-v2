@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
@@ -87,6 +88,51 @@ func (h *StudentCardsHandler) GetStudentCards(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: response})
 }
 
+// GetStudyCards retorna cards para estudo, com filtro opcional de disciplina
+// Suporta diferentes modos de estudo (new, review, all) e limite de cards novos
+func (h *StudentCardsHandler) GetStudyCards(c *gin.Context) {
+	studentEmail, exists := c.Get("user_email")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, dto.APIResponse{Success: false, Error: "unauthorized"})
+		return
+	}
+
+	email := studentEmail.(string)
+	productID := c.Query("product_id")
+	disciplineID := c.Query("discipline_id")
+	studyMode := c.DefaultQuery("mode", "new") // new, review, all
+	newLimit := 0
+	if limit := c.Query("new_limit"); limit != "" {
+		fmt.Sscanf(limit, "%d", &newLimit)
+	}
+
+	// Se product_id não foi passado, busca o primeiro acesso ativo do aluno
+	if productID == "" {
+		var access models.StudentAccess
+		if err := h.db.Where("email = ? AND active = ?", email, true).First(&access).Error; err != nil {
+			c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "product_id required or student has no active access"})
+			return
+		}
+		productID = access.ProductID
+	}
+
+	// Verificar acesso
+	access, err := h.studentAccRepo.GetByEmailAndProduct(email, productID)
+	if err != nil || access == nil || !access.Active {
+		c.JSON(http.StatusForbidden, dto.APIResponse{Success: false, Error: "student does not have access to this product"})
+		return
+	}
+
+	// Buscar cards para estudo
+	studyCards, err := h.getStudyCardsForStudent(email, productID, disciplineID, studyMode, newLimit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.APIResponse{Success: false, Error: "failed to load study cards"})
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: studyCards})
+}
+
 // getDisciplinesWithCards busca todas as disciplinas com seus cards para um produto
 func (h *StudentCardsHandler) getDisciplinesWithCards(productID string) ([]dto.StudentDisciplineResponse, error) {
 	var disciplines []models.Discipline
@@ -123,4 +169,49 @@ func (h *StudentCardsHandler) getDisciplinesWithCards(productID string) ([]dto.S
 	}
 
 	return response, nil
+}
+
+// getStudyCardsForStudent retorna cards para estudo com filtros aplicados
+// Modo: "new" (só novos), "review" (só para revisar), "all" (todos)
+func (h *StudentCardsHandler) getStudyCardsForStudent(email, productID, disciplineID, studyMode string, newLimit int) ([]dto.StudentCardResponse, error) {
+	var studyCards []dto.StudentCardResponse
+
+	// Query base: todos os cards do produto
+	query := h.db.Where("product_id = ?", productID)
+
+	// Se uma disciplina foi especificada, filtrar por ela
+	if disciplineID != "" && disciplineID != "all" {
+		query = query.Where("discipline_id = ?", disciplineID)
+	}
+
+	var cards []models.Card
+	if err := query.Order("\"order\" ASC").Find(&cards).Error; err != nil {
+		return nil, err
+	}
+
+	// Se for modo "new", limitar a quantidade
+	if studyMode == "new" && newLimit > 0 && len(cards) > newLimit {
+		cards = cards[:newLimit]
+	}
+
+	// Buscar as disciplinas para ter os nomes
+	var disciplines []models.Discipline
+	h.db.Where("product_id = ?", productID).Find(&disciplines)
+	discMap := make(map[string]string)
+	for _, d := range disciplines {
+		discMap[d.ID] = d.Name
+	}
+
+	// Converter para DTO
+	for _, card := range cards {
+		studyCards = append(studyCards, dto.StudentCardResponse{
+			ID:       card.ID,
+			Front:    card.Front,
+			Back:     card.Back,
+			Order:    card.Order,
+			Category: discMap[card.DisciplineID],
+		})
+	}
+
+	return studyCards, nil
 }

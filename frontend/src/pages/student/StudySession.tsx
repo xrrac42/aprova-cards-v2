@@ -333,12 +333,15 @@ const StudySession: React.FC = () => {
         ? supabase.from('mentors').select('primary_color, secondary_color').eq('id', session.mentor_id).maybeSingle()
         : Promise.resolve({ data: null });
 
-      const cardsPromise = supabase.rpc('get_study_cards', {
-        p_email: session!.email,
-        p_product_id: session!.product_id!,
-        p_discipline_id: isAll ? null : disciplineId!,
-        p_mode: studyMode,
-        p_new_limit: newLimit,
+      const cardsPromise = fetch(`/api/v1/student/study-cards?product_id=${session!.product_id}${isAll ? '' : `&discipline_id=${disciplineId}`}&mode=${studyMode}&new_limit=${newLimit}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session!.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      }).then(r => r.json()).then(res => {
+        if (!res.success) throw new Error(res.error || 'Failed to fetch cards');
+        return { data: res.data || [] };
       });
 
       const [discResult, mentorResult, cardsResult] = await Promise.all([

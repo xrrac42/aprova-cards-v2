@@ -43,15 +43,14 @@ type StudentCardResponse struct {
 }
 
 type StudentDisciplineResponse struct {
-	ID    string                 `json:"id"`
-	Name  string                 `json:"name"`
-	Order int                    `json:"order"`
-	Cards []StudentCardResponse  `json:"cards"`
+	ID    string                `json:"id"`
+	Name  string                `json:"name"`
+	Order int                   `json:"order"`
+	Cards []StudentCardResponse `json:"cards"`
 }
 
 type StudentProductCardsResponse struct {
-	ProductID    string                       `json:"product_id"`
-	Disciplines  []StudentDisciplineResponse  `json:"disciplines"`
-	TotalCards   int                          `json:"total_cards"`
+	ProductID   string                      `json:"product_id"`
+	Disciplines []StudentDisciplineResponse `json:"disciplines"`
+	TotalCards  int                         `json:"total_cards"`
 }
-

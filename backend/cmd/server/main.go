@@ -171,6 +171,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		studentAccRepoCards := repositories.NewStudentAccessRepository(db)
 		studentCardsHandler := handlers.NewStudentCardsHandler(studentCardRepo, studentDiscRepo, studentProdRepo, studentAccRepoCards, db)
 		protected.GET("/student/cards", studentCardsHandler.GetStudentCards)
+		protected.GET("/student/study-cards", studentCardsHandler.GetStudyCards)
 
 		// -- Mentors (admin only) --
 		mentorUC := usecases.NewMentorUseCase(mentorRepo)

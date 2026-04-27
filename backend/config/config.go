@@ -18,11 +18,19 @@ type Config struct {
 	Supabase    SupabaseConfig
 	Stripe      StripeConfig
 	OpenAI      OpenAIConfig
+	Email       EmailConfig
 	FrontendURL string
 }
 
 type OpenAIConfig struct {
 	APIKey string
+}
+
+type EmailConfig struct {
+	SMTPHost string
+	SMTPPort string
+	From     string
+	Password string
 }
 
 type StripeConfig struct {
@@ -108,6 +116,12 @@ func Load() *Config {
 		},
 		OpenAI: OpenAIConfig{
 			APIKey: getEnv("OPENAI_API_KEY", ""),
+		},
+		Email: EmailConfig{
+			SMTPHost: getEnv("SMTP_HOST", ""),
+			SMTPPort: getEnv("SMTP_PORT", "587"),
+			From:     getEnv("SMTP_FROM", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
 		},
 		FrontendURL: getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
 	}

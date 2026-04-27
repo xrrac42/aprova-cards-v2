@@ -111,3 +111,24 @@ type ActivateFromCheckoutRequest struct {
 	StripeSessionID      string
 	StripeSubscriptionID string
 }
+
+// CheckoutSessionInfoRequest queries session information
+type CheckoutSessionInfoRequest struct {
+	SessionID string `form:"session_id" binding:"required"`
+}
+
+// CheckoutSessionInfoResponse returns session information for success page
+type CheckoutSessionInfoResponse struct {
+	MentorName   string `json:"mentor_name"`
+	ProductName  string `json:"product_name"`
+	StudentEmail string `json:"student_email"`
+	AmountCents  int    `json:"amount_cents"`
+}
+
+// WelcomeEmailRequest sends a welcome email to student
+type WelcomeEmailRequest struct {
+	StudentEmail string `json:"student_email" binding:"required,email"`
+	MentorName   string `json:"mentor_name" binding:"required"`
+	ProductName  string `json:"product_name" binding:"required"`
+	SessionID    string `json:"session_id" binding:"required"`
+}

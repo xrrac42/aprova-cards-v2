@@ -9,6 +9,7 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/repositories"
 	"github.com/approva-cards/back-aprova-cards/internal/usecases"
 	appauth "github.com/approva-cards/back-aprova-cards/pkg/auth"
+	emailsvc "github.com/approva-cards/back-aprova-cards/pkg/email"
 	"github.com/approva-cards/back-aprova-cards/pkg/middleware"
 	aiclient "github.com/approva-cards/back-aprova-cards/pkg/openai"
 	"github.com/gin-gonic/gin"
@@ -150,6 +151,14 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	paymentUC := usecases.NewPaymentUseCase(paymentRepo0, mentorRepo, productRepo0, cfg.Stripe)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(paymentUC, studentSignUpUC)
 	api.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhookEvent)
+
+	// ---- Checkout routes (public) ----
+	emailService := emailsvc.NewEmailService(cfg.Email.SMTPHost, cfg.Email.SMTPPort, cfg.Email.From, cfg.Email.Password)
+	mentorUC0 := usecases.NewMentorUseCase(mentorRepo)
+	productUC0 := usecases.NewProductUseCase(productRepo0, discRepoForProducts)
+	checkoutHandler := handlers.NewCheckoutHandler(studentSignUpUC, productUC0, mentorUC0, emailService, cfg.Stripe.SecretKey, cfg.FrontendURL)
+	api.GET("/checkout/session-info", checkoutHandler.GetSessionInfo)
+	api.POST("/welcome-email", checkoutHandler.SendWelcomeEmail)
 
 	// ---- Protected routes (JWT required) ----
 	protected := api.Group("")

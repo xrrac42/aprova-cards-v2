@@ -124,6 +124,18 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	healthCheckHandler := handlers.NewHealthCheckHandler(db)
 	api.GET("/admin/health-check", healthCheckHandler.Check)
 
+	// ---- Admin Reports ----
+	reportsHandler := handlers.NewReportsHandler(db)
+	api.GET("/admin/reports", reportsHandler.GetAdminReports)
+
+	// ---- Admin System Health (full) ----
+	incidentRepo := repositories.NewSystemIncidentRepository(db)
+	sessionRepo := repositories.NewStudentSessionRepository(db)
+	studentAccessRepoHealth := repositories.NewStudentAccessRepository(db)
+	sysHealthHandler := handlers.NewSystemHealthHandler(incidentRepo, sessionRepo, studentAccessRepoHealth)
+	api.GET("/admin/system-health", sysHealthHandler.GetSystemHealth)
+	api.POST("/admin/incidents/:id/resolve", sysHealthHandler.ResolveIncident)
+
 	// ---- Feedback (public for students via X-Student-Email header) ----
 	feedbackRepo := repositories.NewFeedbackRepository(db)
 	feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo)
@@ -235,6 +247,18 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 			invitations.GET("", studentSignUpHandler.ListInvitations)
 			invitations.GET("/:id", studentSignUpHandler.GetInvitation)
 		}
+
+		// -- Sessions (student study sessions) --
+		sessionRepo2 := repositories.NewStudentSessionRepository(db)
+		sessionHandler := handlers.NewSessionHandler(sessionRepo2)
+		protected.POST("/sessions", sessionHandler.Create)
+		protected.POST("/sessions/:id/complete", sessionHandler.Complete)
+
+		// -- Progress (student card progress) --
+		progressRepo := repositories.NewStudentProgressRepository(db)
+		progressHandler := handlers.NewProgressHandler(progressRepo)
+		protected.POST("/students/:email/progress/sync", progressHandler.SyncProgress)
+		protected.GET("/students/:email/progress", progressHandler.GetProgress)
 	}
 
 	fmt.Println("✅ Routes registered successfully")

@@ -115,7 +115,7 @@ const StudentHome: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch product + mentor
+      // Fetch product + mentor from Supabase
       const { data: prod } = await supabase.from('products').select('*, mentors(*)').eq('id', session!.product_id).maybeSingle();
       if (!prod) { setError('Produto não encontrado.'); setLoading(false); return; }
       setProduct(prod);

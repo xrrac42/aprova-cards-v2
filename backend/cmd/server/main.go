@@ -164,6 +164,14 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	protected := api.Group("")
 	protected.Use(middleware.AuthMiddleware(cfg.JWT.Secret))
 	{
+		// -- Student Cards (student view of their product's cards) --
+		studentCardRepo := repositories.NewCardRepository(db)
+		studentDiscRepo := repositories.NewDisciplineRepository(db)
+		studentProdRepo := repositories.NewProductRepository(db)
+		studentAccRepoCards := repositories.NewStudentAccessRepository(db)
+		studentCardsHandler := handlers.NewStudentCardsHandler(studentCardRepo, studentDiscRepo, studentProdRepo, studentAccRepoCards, db)
+		protected.GET("/student/cards", studentCardsHandler.GetStudentCards)
+
 		// -- Mentors (admin only) --
 		mentorUC := usecases.NewMentorUseCase(mentorRepo)
 		mentorHandler := handlers.NewMentorHandler(mentorUC, adminMentorUC, supabaseAdminClient)

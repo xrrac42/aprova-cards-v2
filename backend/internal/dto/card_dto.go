@@ -35,11 +35,14 @@ type GenerateCardsResponse struct {
 
 // Student view DTOs
 type StudentCardResponse struct {
-	ID       string `json:"id"`
-	Front    string `json:"front"`
-	Back     string `json:"back"`
-	Order    int    `json:"order"`
-	Category string `json:"category"` // discipline name
+	ID                   string `json:"id"`
+	DisciplineID         string `json:"discipline_id"`
+	DisciplineName       string `json:"discipline_name"`
+	Front                string `json:"front"`
+	Back                 string `json:"back"`
+	Order                int    `json:"order"`
+	ExistingCorrectCount int    `json:"existing_correct_count"`
+	ExistingIncorrectCount int  `json:"existing_incorrect_count"`
 }
 
 type StudentDisciplineResponse struct {

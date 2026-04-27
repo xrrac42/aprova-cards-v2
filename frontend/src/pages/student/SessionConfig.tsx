@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
 import { applyMentorTheme } from '@/lib/theme';
 import { RotateCcw, BookOpen, Zap, Play, ArrowLeft } from 'lucide-react';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 type StudyMode = 'review' | 'new' | 'mixed';
 
@@ -48,55 +49,59 @@ const SessionConfig: React.FC = () => {
     try {
       const isAll = disciplineId === 'all';
 
-      const mentorPromise = session?.mentor_id
-        ? supabase.from('mentors').select('primary_color, secondary_color, accent_color').eq('id', session.mentor_id).maybeSingle()
-        : Promise.resolve({ data: null });
-
-      const statsPromise = supabase.rpc('get_student_discipline_stats', {
-        p_email: session!.email,
-        p_product_id: session!.product_id!,
+      // Call backend API instead of Supabase RPC to get all student data
+      const res = await fetch(`${BACKEND_URL}/api/v1/student/home`, {
+        headers: {
+          'Authorization': `Bearer ${session!.access_token}`,
+          'Content-Type': 'application/json',
+        },
       });
 
-      const [mentorResult, statsResult] = await Promise.all([mentorPromise, statsPromise]);
+      if (!res.ok) {
+        throw new Error(`Failed to load stats: ${res.status}`);
+      }
 
-      if (mentorResult.data) applyMentorTheme((mentorResult.data as any).primary_color, (mentorResult.data as any).secondary_color, (mentorResult.data as any).accent_color);
+      const json = await res.json();
+      if (!json.success) {
+        throw new Error(json.error || 'Failed to load stats');
+      }
 
-      const allStats = statsResult.data || [];
+      const { mentor, disciplines } = json.data;
+
+      // Apply mentor theme if available
+      if (mentor?.primary_color && mentor?.secondary_color) {
+        applyMentorTheme(mentor.primary_color, mentor.secondary_color);
+      }
 
       if (isAll) {
         setDisciplineName('Todas as disciplinas');
-        let total = 0, due = 0, newCount = 0;
-        for (const d of allStats) {
+        let total = 0;
+        for (const d of disciplines) {
           total += Number(d.total_cards);
-          due += Number(d.reviews_due);
-          newCount += Number(d.new_available);
         }
         setTotalCards(total);
-        setReviewsDue(due);
-        setNewAvailable(newCount);
+        setReviewsDue(0); // Not available from this endpoint
+        setNewAvailable(total);
       } else {
-        const disc = allStats.find((d: any) => d.discipline_id === disciplineId);
+        const disc = disciplines.find((d: any) => d.id === disciplineId);
         if (disc) {
-          setDisciplineName(disc.discipline_name);
+          setDisciplineName(disc.name);
           setTotalCards(Number(disc.total_cards));
-          setReviewsDue(Number(disc.reviews_due));
-          setNewAvailable(Number(disc.new_available));
+          setReviewsDue(0); // Not available from this endpoint
+          setNewAvailable(Number(disc.total_cards));
         }
       }
 
-      const due = isAll
-        ? allStats.reduce((s: number, d: any) => s + Number(d.reviews_due), 0)
-        : Number(allStats.find((d: any) => d.discipline_id === disciplineId)?.reviews_due || 0);
-      const newCount = isAll
-        ? allStats.reduce((s: number, d: any) => s + Number(d.new_available), 0)
-        : Number(allStats.find((d: any) => d.discipline_id === disciplineId)?.new_available || 0);
-
-      if (due > 0 && newCount > 0) setMode('mixed');
-      else if (due > 0) setMode('review');
-      else if (newCount > 0) setMode('new');
-      else setMode('review');
+      // Default mode to 'new' since we don't have review stats from this endpoint
+      setMode('new');
     } catch (err) {
-      console.error(err);
+      console.error('Error loading stats:', err);
+      // Set defaults on error
+      setMode('new');
+      if (disciplineId !== 'all') {
+        // Try to at least show the discipline name
+        setDisciplineName(disciplineId === 'all' ? 'Todas as disciplinas' : 'Disciplina');
+      }
     } finally {
       setLoading(false);
     }

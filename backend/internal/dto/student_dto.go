@@ -1,5 +1,37 @@
 package dto
 
+// ─── Student Home ─────────────────────────────────────────────────────────────
+
+type StudentMentorInfo struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	LogoURL        *string `json:"logo_url"`
+	PrimaryColor   string  `json:"primary_color"`
+	SecondaryColor string  `json:"secondary_color"`
+}
+
+type StudentProductInfo struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	CoverImageURL *string `json:"cover_image_url"`
+}
+
+type StudentDisciplineStat struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Order      int    `json:"order"`
+	TotalCards int    `json:"total_cards"`
+}
+
+type StudentHomeResponse struct {
+	Product     StudentProductInfo      `json:"product"`
+	Mentor      StudentMentorInfo       `json:"mentor"`
+	Disciplines []StudentDisciplineStat `json:"disciplines"`
+	TotalCards  int                     `json:"total_cards"`
+}
+
+// ─── Student Access ───────────────────────────────────────────────────────────
+
 type AddStudentRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }

@@ -4,7 +4,6 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
 import { calculateNextReview, isCorrectRating } from '@/lib/spaced-repetition';
-import { applyMentorTheme } from '@/lib/theme';
 import type { Rating } from '@/types';
 import { X, RefreshCw } from 'lucide-react';
 import FeedbackPopup from '@/components/FeedbackPopup';
@@ -325,39 +324,29 @@ const StudySession: React.FC = () => {
       setError(null);
       const isAll = disciplineId === 'all';
 
-      const discNamePromise = !isAll
-        ? supabase.from('disciplines').select('name').eq('id', disciplineId!).maybeSingle()
-        : Promise.resolve({ data: { name: 'Todas as disciplinas' } } as any);
-
-      const mentorPromise = session?.mentor_id
-        ? supabase.from('mentors').select('primary_color, secondary_color').eq('id', session.mentor_id).maybeSingle()
-        : Promise.resolve({ data: null });
-
-      const cardsPromise = fetch(`/api/v1/student/study-cards?product_id=${session!.product_id}${isAll ? '' : `&discipline_id=${disciplineId}`}&mode=${studyMode}&new_limit=${newLimit}`, {
+      const url = `/api/v1/student/study-cards?product_id=${session!.product_id}${isAll ? '' : `&discipline_id=${disciplineId}`}&mode=${studyMode}&new_limit=${newLimit}`;
+      const res = await fetch(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${session!.access_token}`,
           'Content-Type': 'application/json',
         },
-      }).then(r => r.json()).then(res => {
-        if (!res.success) throw new Error(res.error || 'Failed to fetch cards');
-        return { data: res.data || [] };
       });
 
-      const [discResult, mentorResult, cardsResult] = await Promise.all([
-        discNamePromise, mentorPromise, cardsPromise,
-      ]);
-
-      if (discResult.data) {
-        activeDisciplineName = discResult.data.name;
-        setDisciplineName(discResult.data.name);
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || `HTTP ${res.status}`);
       }
-      if (mentorResult.data) applyMentorTheme(mentorResult.data.primary_color, mentorResult.data.secondary_color);
 
-      // Deduplicate cards by id
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Falha ao buscar cards');
+
+      const rawCards: any[] = json.data || [];
+
+      // Deduplicate
       const seen = new Set<string>();
       const studyCards: StudyCard[] = [];
-      for (const c of (cardsResult.data || []) as any[]) {
+      for (const c of rawCards) {
         if (seen.has(c.id)) continue;
         seen.add(c.id);
         studyCards.push({
@@ -371,7 +360,14 @@ const StudySession: React.FC = () => {
         });
       }
 
-      // Fisher-Yates shuffle para garantir ordem aleatória a cada sessão
+      // Discipline name: derive from cards (backend already returns discipline_name per card)
+      const discName = isAll
+        ? 'Todas as disciplinas'
+        : studyCards[0]?.discipline_name || '';
+      activeDisciplineName = discName;
+      setDisciplineName(discName);
+
+      // Fisher-Yates shuffle
       for (let i = studyCards.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [studyCards[i], studyCards[j]] = [studyCards[j], studyCards[i]];

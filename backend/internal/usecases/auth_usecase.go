@@ -18,7 +18,7 @@ import (
 type AuthUseCase interface {
 	InviteAndGrantAccess(email string, mentorID string) error
 	AdminLogin(req *dto.AdminLoginRequest, jwtSecret string, jwtExp int) (*dto.LoginResponse, error)
-	ValidateStudentPortalAccess(slug, studentID, studentEmail string) (*dto.StudentPortalAccessResponse, error)
+	ValidateStudentPortalAccess(slug, studentID, studentEmail, jwtSecret string, jwtExp int) (*dto.StudentPortalAccessResponse, error)
 }
 
 type authUseCase struct {
@@ -90,7 +90,7 @@ func (uc *authUseCase) AdminLogin(req *dto.AdminLoginRequest, jwtSecret string, 
 	}, nil
 }
 
-func (uc *authUseCase) ValidateStudentPortalAccess(slug, studentID, studentEmail string) (*dto.StudentPortalAccessResponse, error) {
+func (uc *authUseCase) ValidateStudentPortalAccess(slug, studentID, studentEmail, jwtSecret string, jwtExp int) (*dto.StudentPortalAccessResponse, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" || strings.TrimSpace(studentID) == "" {
 		return nil, apperrors.NewBadRequest("slug e student_id são obrigatórios")
@@ -121,10 +121,13 @@ func (uc *authUseCase) ValidateStudentPortalAccess(slug, studentID, studentEmail
 		LIMIT 1
 	`, studentID, mentor.ID).Scan(&access).Error
 	if err == nil && strings.TrimSpace(access.ProductID) != "" {
+		email := access.Email
+		token, _ := auth.GenerateToken(jwtSecret, jwtExp, studentID, email, "aluno")
 		return &dto.StudentPortalAccessResponse{
+			Token:     token,
 			MentorID:  mentor.ID,
 			ProductID: access.ProductID,
-			Email:     access.Email,
+			Email:     email,
 		}, nil
 	}
 
@@ -149,9 +152,15 @@ func (uc *authUseCase) ValidateStudentPortalAccess(slug, studentID, studentEmail
 		return nil, apperrors.NewForbidden("Acesso negado. Você não possui permissão para acessar este portal.")
 	}
 
+	email := access.Email
+	if email == "" {
+		email = studentEmail
+	}
+	token, _ := auth.GenerateToken(jwtSecret, jwtExp, studentID, email, "aluno")
 	return &dto.StudentPortalAccessResponse{
+		Token:     token,
 		MentorID:  mentor.ID,
 		ProductID: access.ProductID,
-		Email:     access.Email,
+		Email:     email,
 	}, nil
 }

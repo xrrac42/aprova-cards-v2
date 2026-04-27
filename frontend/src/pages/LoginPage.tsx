@@ -193,6 +193,8 @@ const LoginPage: React.FC = () => {
             mentor_id: validationPayload.data.mentor_id,
             mentor_name: mentor?.name,
             product_id: validationPayload.data.product_id,
+            // Go JWT emitido pelo backend — usado em todas as chamadas de dados
+            access_token: validationPayload.data.token || session.access_token,
           };
           setSession(portalSession);
         }

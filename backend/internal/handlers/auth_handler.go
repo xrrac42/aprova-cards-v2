@@ -58,7 +58,7 @@ func (h *AuthHandler) ValidateStudentPortalAccess(c *gin.Context) {
 		return
 	}
 
-	portalAccess, err := h.usecase.ValidateStudentPortalAccess(req.Slug, studentClaims.Sub, studentClaims.Email)
+	portalAccess, err := h.usecase.ValidateStudentPortalAccess(req.Slug, studentClaims.Sub, studentClaims.Email, h.jwtSecret, h.jwtExp)
 	if err != nil {
 		if appErr, ok := err.(*apperrors.AppError); ok {
 			c.JSON(appErr.Status, dto.APIResponse{Success: false, Error: appErr.Message})

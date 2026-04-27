@@ -13,7 +13,7 @@ type StudentAccess struct {
 	ProductID      string    `gorm:"not null;type:uuid" json:"product_id"`
 	Active         bool      `gorm:"not null;default:true" json:"active"`
 	InactiveReason *string   `json:"inactive_reason"`
-	InvitationID   *string   `gorm:"type:uuid" json:"invitation_id"` // Link to invitation
+	InvitationID  *string `gorm:"-" json:"invitation_id,omitempty"`
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 

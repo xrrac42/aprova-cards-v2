@@ -125,20 +125,17 @@ func (h *StripeWebhookHandler) handleCheckoutSessionCompleted(c *gin.Context, ev
 
 	inviteCode := session.Metadata["invite_code"]
 
+	// Canonical student email comes only from metadata set server-side during checkout creation.
+	// CustomerDetails.Email is the Stripe billing email and must never control access.
 	studentEmail := ""
-	if v, ok := session.Metadata["student_email"]; ok {
+	if v, ok := session.Metadata["student_email"]; ok && v != "" {
 		studentEmail = v
 	}
-	if session.CustomerDetails != nil {
-		if studentEmail == "" {
-			studentEmail = session.CustomerDetails.Email
-		}
-	}
 
-	if inviteCode == "" || studentEmail == "" {
+	if inviteCode == "" {
 		c.JSON(http.StatusOK, dto.APIResponse{
 			Success: true,
-			Message: "Missing invite_code or email",
+			Message: "Missing invite_code",
 		})
 		return
 	}

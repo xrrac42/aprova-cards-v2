@@ -34,6 +34,7 @@ const StudySession = lazy(() => import("./pages/student/StudySession"));
 const SessionConfig = lazy(() => import("./pages/student/SessionConfig"));
 const EndSession = lazy(() => import("./pages/student/EndSession"));
 const Reports = lazy(() => import("./pages/student/Reports"));
+const PaymentSuccess = lazy(() => import("./pages/student/PaymentSuccess"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -99,6 +100,7 @@ const App = () => (
           <Route path="/admin/personalizacao" element={<Customization />} />
           <Route path="/checkout" element={<CheckoutRoute />} />
           <Route path="/convite" element={<StudentSignUpFlow />} />
+          <Route path="/payment/success" element={<PaymentSuccess />} />
 
           {/* Student — StudySession gets its own Suspense to prevent remounts */}
           <Route path="/aluno" element={<StudentHome />} />

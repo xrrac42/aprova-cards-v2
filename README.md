@@ -299,7 +299,158 @@ DELETE /api/v1/samples/:id         # Deletar sample
 
 ---
 
-## 🐳 Deploy (Coolify / VPS)
+## � Stripe Webhook Setup (Desenvolvimento Local)
+
+### O que é?
+
+O webhook do Stripe é um endpoint que Stripe chama **quando eventos de pagamento acontecem** (ex: pagamento aprovado, refund, etc). Ele ativa automaticamente a concessão de acesso do estudante ao curso.
+
+**Fluxo de pagamento:**
+1. Estudante completa pagamento no Stripe Checkout
+2. Stripe envia evento `checkout.session.completed` para seu webhook
+3. Backend processa o evento e cria `student_access`
+4. Estudante ganha acesso ao curso
+5. Email de boas-vindas é enviado
+
+### Instalação da Stripe CLI
+
+#### macOS
+```bash
+brew install stripe/stripe-cli/stripe
+```
+
+#### Linux (Debian/Ubuntu)
+```bash
+sudo apt-get install stripe
+```
+
+#### Windows
+```bash
+scoop install stripe
+# ou
+choco install stripe
+```
+
+#### Verificar instalação
+```bash
+stripe version
+# Resposta esperada: stripe version x.y.z
+```
+
+### Setup do Webhook (3 passos)
+
+#### 1️⃣ Login na Stripe CLI
+```bash
+stripe login
+```
+Autorize a aplicação no navegador. Você receberá uma **chave de restrição**.
+
+#### 2️⃣ Rodar o Listener (em uma aba separada do terminal)
+```bash
+stripe listen --forward-to http://localhost:8080/api/v1/webhooks/stripe
+```
+
+**Output esperado:**
+```
+⚠️  The `listen` command is in beta
+> Ready! Your webhook signing secret is: whsec_1234567890abcdef...
+> Forwarding events to http://localhost:8080/api/v1/webhooks/stripe
+```
+
+#### 3️⃣ Copiar o Secret no .env
+```env
+STRIPE_WEBHOOK_SECRET=whsec_1234567890abcdef...
+```
+
+Depois reinicie o backend:
+```bash
+cd backend && go run cmd/server/main.go
+```
+
+### Testar Webhook Localmente
+
+Numa terceira aba do terminal, trigger um evento:
+```bash
+stripe trigger checkout.session.completed
+```
+
+**Você verá:**
+- ✅ **CLI**: `✓ POST http://localhost:8080/api/v1/webhooks/stripe → 200`
+- ✅ **Backend logs**: `[webhook] checkout.session.completed handled successfully`
+
+### Variáveis de Ambiente Necessárias
+
+```env
+# Stripe (obrigatório)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...          # Copiar de stripe listen --forward-to
+
+# Email (opcional, para enviar boas-vindas)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_FROM=seu-email@gmail.com
+SMTP_PASSWORD=sua-app-password            # Usar "app password" do Gmail, não a senha da conta
+
+# Frontend (obrigatório)
+FRONTEND_BASE_URL=http://localhost:5173
+```
+
+### Testando com Cartões Fictícios
+
+Stripe oferece cartões de teste para diferentes cenários:
+
+| Número | Resultado | Uso |
+|---|---|---|
+| `4242 4242 4242 4242` | Sucesso | Pagamentos bem-sucedidos |
+| `4000 0025 0000 3155` | Falha | Testar recusas |
+| `4000 0000 0000 0002` | Falha (decline) | Testar cancelamento |
+
+**Use qualquer data futura e CVC aleatório** (ex: 12/34, CVC 567)
+
+### Troubleshooting
+
+**Problema:** `Connection refused` ao chamar webhook
+```
+❌ POST http://localhost:8080/api/v1/webhooks/stripe → Connection refused
+```
+**Solução:** Garanta que o backend está rodando na porta 8080:
+```bash
+cd backend && go run cmd/server/main.go
+```
+
+**Problema:** `Webhook signature verification failed`
+```
+❌ error: webhook signature verification failed
+```
+**Solução:** O `STRIPE_WEBHOOK_SECRET` no `.env` está incorreto. Copie novamente de `stripe listen`:
+```bash
+# Terminar o listener anterior
+stripe listen --forward-to http://localhost:8080/api/v1/webhooks/stripe
+# Copiar o novo secret e atualizar .env
+```
+
+**Problema:** Eventos não chegam ao backend
+```
+❌ No logs appearing in backend when triggering stripe trigger...
+```
+**Solução:** Verifique se a CLI está escutando corretamente:
+```bash
+# Terminal 1: CLI ligada
+stripe listen --forward-to http://localhost:8080/api/v1/webhooks/stripe
+
+# Terminal 2: Backend rodando
+cd backend && go run cmd/server/main.go
+
+# Terminal 3: Trigger evento
+stripe trigger checkout.session.completed
+```
+
+Para detalhes completos, consulte [STRIPE_WEBHOOK_SETUP.md](STRIPE_WEBHOOK_SETUP.md).
+
+---
+
+## �🐳 Deploy (Coolify / VPS)
 
 ```bash
 # Build e sobe os containers

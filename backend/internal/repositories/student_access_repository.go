@@ -5,6 +5,7 @@ import (
 
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type StudentAccessRepository interface {
@@ -21,7 +22,14 @@ func NewStudentAccessRepository(db *gorm.DB) StudentAccessRepository {
 }
 
 func (r *studentAccessRepository) Create(entity *models.StudentAccess) error {
-	return r.db.Create(entity).Error
+	// ON CONFLICT (email, product_id): if a row already exists for this student+product,
+	// reactivate it and fill in any missing enrichment columns instead of failing.
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "email"}, {Name: "product_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"active", "student_id", "mentor_id", "invitation_id", "inactive_reason",
+		}),
+	}).Create(entity).Error
 }
 
 func (r *studentAccessRepository) GetByProductID(productID string, page, pageSize int) ([]models.StudentAccess, int64, error) {

@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+type SupabaseAdmin interface {
+	CreateAuthUser(email, password string) (*SupabaseUser, error)
+	CreateAuthUserWithMetadata(email, password string, userMetadata map[string]interface{}) (*SupabaseUser, error)
+	InviteUserByEmail(email string) (*SupabaseUser, error)
+	DeleteAuthUser(userID string) error
+	GetUserFromAccessToken(accessToken string) (*SupabaseUser, error)
+}
+
 type SupabaseAdminClient struct {
 	baseURL        string
 	serviceRoleKey string
@@ -104,6 +112,39 @@ func (c *SupabaseAdminClient) CreateAuthUserWithMetadata(email, password string,
 	created := extractCreatedUser(out)
 	if created.ID == "" {
 		return nil, fmt.Errorf("supabase create user returned empty user id (response=%s)", string(respBody))
+	}
+	return &created, nil
+}
+
+func (c *SupabaseAdminClient) InviteUserByEmail(email string) (*SupabaseUser, error) {
+	if !c.IsConfigured() {
+		return nil, fmt.Errorf("supabase admin client not configured")
+	}
+
+	payload := map[string]interface{}{
+		"email": strings.ToLower(strings.TrimSpace(email)),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	respBody, statusCode, err := c.doRequest(http.MethodPost, c.baseURL+"/auth/v1/admin/invite", bytes.NewReader(body), c.serviceRoleKey)
+	if err != nil {
+		return nil, err
+	}
+	if statusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("supabase invite user failed: %s", extractErrorMessage(respBody))
+	}
+
+	var out createUserResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, err
+	}
+
+	created := extractCreatedUser(out)
+	if created.ID == "" {
+		return nil, fmt.Errorf("supabase invite returned empty user id (response=%s)", string(respBody))
 	}
 	return &created, nil
 }

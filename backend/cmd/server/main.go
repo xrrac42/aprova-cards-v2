@@ -82,7 +82,8 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	// ---- Auth (public, stricter rate limit: 5 req / 5 min) ----
 	authLimiter := middleware.NewRateLimiter(5, 300)
 	mentorRepo := repositories.NewMentorRepository(db)
-	authUC := usecases.NewAuthUseCase(mentorRepo, db, cfg.Admin.Email, cfg.Admin.Password)
+	studentAccessRepoForAuth := repositories.NewStudentAccessRepository(db)
+	authUC := usecases.NewAuthUseCase(mentorRepo, studentAccessRepoForAuth, supabaseAdminClient, db, cfg.Admin.Email, cfg.Admin.Password)
 	authHandler := handlers.NewAuthHandler(authUC, cfg.JWT.Secret, cfg.JWT.Expiration)
 	adminMentorUC := usecases.NewAdminMentorUseCase(db, supabaseAdminClient)
 
@@ -147,7 +148,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	paymentRepo0 := repositories.NewPaymentRepository(db)
 	studentAccessRepo0 := repositories.NewStudentAccessRepository(db)
 	studentSignUpUC := usecases.NewStudentSignUpUseCase(
-		invitationRepo, mentorRepo, productRepo0, paymentRepo0, studentAccessRepo0,
+		db, invitationRepo, mentorRepo, productRepo0, paymentRepo0, studentAccessRepo0,
 		nil, supabaseAdminClient,
 		cfg.Stripe.SecretKey, cfg.FrontendURL,
 	)

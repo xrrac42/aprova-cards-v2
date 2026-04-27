@@ -10,6 +10,8 @@ import (
 type StudentAccess struct {
 	ID             string    `gorm:"primaryKey;type:uuid" json:"id"`
 	Email          string    `gorm:"not null" json:"email"`
+	StudentID      *string   `gorm:"type:uuid" json:"student_id"`
+	MentorID       string    `gorm:"not null;type:uuid" json:"mentor_id"`
 	ProductID      string    `gorm:"not null;type:uuid" json:"product_id"`
 	Active         bool      `gorm:"not null;default:true" json:"active"`
 	InactiveReason *string   `json:"inactive_reason"`

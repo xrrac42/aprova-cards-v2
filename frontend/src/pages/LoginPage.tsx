@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { login } from '@/lib/auth';
+import { login, setSession } from '@/lib/auth';
 import { supabase } from '@/integrations/supabase/client';
 import { applyMentorTheme, resetTheme } from '@/lib/theme';
 import { useToast } from '@/hooks/use-toast';
@@ -184,6 +184,17 @@ const LoginPage: React.FC = () => {
           const payload = await validationRes.json().catch(() => null);
           const serverMessage = payload?.error || 'Acesso negado. Você não possui permissão para acessar este portal.';
           throw new Error(`${serverMessage} Se você acredita que isso é um erro, procure o suporte ou utilize o link correto do seu mentor.`);
+        }
+
+        const validationPayload = await validationRes.json();
+        if (validationPayload?.data?.mentor_id && validationPayload?.data?.product_id) {
+          const portalSession = {
+            ...session,
+            mentor_id: validationPayload.data.mentor_id,
+            mentor_name: mentor?.name,
+            product_id: validationPayload.data.product_id,
+          };
+          setSession(portalSession);
         }
       }
       

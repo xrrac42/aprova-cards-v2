@@ -51,7 +51,7 @@ func (s *emailService) buildWelcomeEmailHTML(studentEmail, mentorName, productNa
 	<style>
 		body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; }
 		.container { max-width: 600px; margin: 0 auto; padding: 20px; }
-		.header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+		.header { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
 		.content { background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
 		.welcome-title { font-size: 24px; font-weight: bold; margin: 20px 0; }
 		.info-box { background: white; border-left: 4px solid #667eea; padding: 15px; margin: 20px 0; }

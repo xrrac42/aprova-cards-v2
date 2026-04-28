@@ -1,73 +1,106 @@
-name: Deploy to Hostinger KVM
+name: Deploy to KVM (Dev)
 
 on:
   push:
     branches:
       - main
 
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          go mod download
+          go test ./... -v -race -count=1
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: 10m
           script: |
-            cd /home/aprova-deploy/aprova-cards-v2
-            
-            # Pull latest code
-            git pull origin main
-            
-            # Ensure .env exists (will be managed separately)
+            set -e
+            DEPLOY_DIR="/home/sudo_root/aprovcode/aprova-cards"
+            cd "$DEPLOY_DIR"
+
+            echo "📥 Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Verificar .env
             if [ ! -f .env ]; then
-              echo "⚠️  .env não encontrado! Configure manualmente na KVM."
+              echo "❌ .env não encontrado! Configure manualmente."
               exit 1
             fi
-            
-            echo "🔨 Building frontend..."
-            cd frontend
-            npm ci  # Clean install
-            npm run build
-            
-            echo "🔨 Building backend..."
-            cd ../backend
-            go mod download
-            go build -o main cmd/server/main.go
-            
-            echo "🔄 Restarting services..."
-            systemctl restart aprova-backend aprova-frontend || sudo systemctl restart aprova-backend aprova-frontend
-            
-            echo "✅ Deploy concluído!"
 
-  notify-slack:
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: always()
-    steps:
-      - name: Notify Slack
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": "Deploy Status: ${{ needs.deploy.result }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Aprova Cards Deploy*\nStatus: ${{ needs.deploy.result }}\nCommit: ${{ github.sha }}\nAutor: ${{ github.actor }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-        if: secrets.SLACK_WEBHOOK_URL != ''
+            # Symlink .env para o backend
+            ln -sf ../.env backend/.env
+
+            echo "📦 Installing frontend dependencies..."
+            cd frontend
+            npm ci --ignore-scripts 2>/dev/null || npm install
+            echo "🔨 Building frontend..."
+            npm run build
+            cd ..
+
+            echo "🔨 Building backend..."
+            cd backend
+            go mod download
+            CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/aprova-cards ./cmd/server/main.go
+            cd ..
+
+            echo "🔄 Restarting backend..."
+            if systemctl is-active --quiet aprova-backend 2>/dev/null; then
+              sudo systemctl restart aprova-backend
+            elif [ -f backend/bin/aprova-cards ]; then
+              # Fallback: kill old process and start new one
+              pkill -f "aprova-cards" 2>/dev/null || true
+              sleep 2
+              cd backend
+              nohup ./bin/aprova-cards > /tmp/aprova-backend.log 2>&1 &
+              cd ..
+            fi
+
+            echo "🔄 Restarting frontend..."
+            if systemctl is-active --quiet aprova-frontend 2>/dev/null; then
+              sudo systemctl restart aprova-frontend
+            else
+              # Fallback: serve frontend with a simple static server
+              echo "⚠️ No systemd service for frontend. Serving via npx serve."
+              pkill -f "serve.*frontend/dist" 2>/dev/null || true
+              sleep 1
+              cd frontend
+              nohup npx serve -s dist -l 5173 > /tmp/aprova-frontend.log 2>&1 &
+              cd ..
+            fi
+
+            # Health check
+            echo "⏳ Waiting for backend to start..."
+            sleep 5
+            if curl -sf http://localhost:8080/api/v1/health > /dev/null 2>&1; then
+              echo "✅ Backend healthy!"
+            else
+              echo "⚠️ Backend health check failed. Check logs: /tmp/aprova-backend.log"
+            fi
+
+            echo "✅ Deploy concluído! $(date)"

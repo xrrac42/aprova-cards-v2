@@ -15,18 +15,6 @@ function cleanCardText(text: string): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\[sound:[^\]]+\]/g, '')
     .replace(/{{[^}]+}}/g, '')
-    // Remove emojis e símbolos especiais
-    .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
-    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
-    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
-    .replace(/[\u{1F700}-\u{1F77F}]/gu, '')
-    .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')
-    .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')
-    .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
-    .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')
-    .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')
-    .replace(/[\u{2600}-\u{26FF}]/gu, '')
-    .replace(/[\u{2700}-\u{27BF}]/gu, '')
     .replace(/\t/g, ' ')
     .replace(/ {2,}/g, ' ')
     .trim();
@@ -38,7 +26,9 @@ export function validateCards(cards: ParsedCard[]): { valid: ParsedCard[]; inval
   const valid: ParsedCard[] = [];
   const invalidCards: ParsedCard[] = [];
   for (const card of cards) {
-    if (card.front.trim() && card.back.trim()) {
+    const frontClean = card.front.replace(/\s+/g, '').trim();
+    const backClean = card.back.replace(/\s+/g, '').trim();
+    if (frontClean.length > 0 && backClean.length > 0) {
       valid.push(card);
     } else {
       invalidCards.push(card);

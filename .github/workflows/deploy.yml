@@ -68,17 +68,21 @@ jobs:
             CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/aprova-cards ./cmd/server/main.go
             cd ..
 
-            echo "🔄 Restarting services..."
-            set +e
-            pkill -f "bin/aprova-cards" 2>/dev/null
-            pkill -f "serve.*dist" 2>/dev/null
+             echo "🔄 Restarting services..."
+            if [ -f /tmp/aprova-backend.pid ]; then
+              kill $(cat /tmp/aprova-backend.pid) 2>/dev/null || true
+            fi
+            if [ -f /tmp/aprova-frontend.pid ]; then
+              kill $(cat /tmp/aprova-frontend.pid) 2>/dev/null || true
+            fi
             sleep 2
-            set -e
 
             cd /opt/aprova-cards/backend
             nohup ./bin/aprova-cards > /tmp/aprova-backend.log 2>&1 &
+            echo $! > /tmp/aprova-backend.pid
             cd /opt/aprova-cards/frontend
             nohup npx serve -s dist -l 5173 > /tmp/aprova-frontend.log 2>&1 &
+            echo $! > /tmp/aprova-frontend.pid
 
             sleep 5
             if curl -sf http://localhost:8080/api/v1/health > /dev/null 2>&1; then

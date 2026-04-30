@@ -40,7 +40,7 @@ jobs:
           command_timeout: 10m
           script: |
             set -e
-            DEPLOY_DIR="/home/sudo_root/aprovcode/aprova-cards"
+            DEPLOY_DIR="/root/aprovcode/aprova-cards"
             cd "$DEPLOY_DIR"
 
             echo "📥 Pulling latest code..."

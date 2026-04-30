@@ -4,6 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { getSession } from '@/lib/auth';
 import { AdminLayout } from './AdminDashboard';
 import { Plus, Edit, Trash2, Search, Loader2, Eye, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 const AdminMentors: React.FC = () => {
   const navigate = useNavigate();
@@ -19,6 +22,8 @@ const AdminMentors: React.FC = () => {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; id: string; name: string }>({ open: false, id: '', name: '' });
+  const [deleting, setDeleting] = useState(false);
   const slugTooShort = form.slug.trim().length > 0 && form.slug.trim().length < 3;
 
   const baseUrl = window.location.origin;
@@ -129,10 +134,24 @@ const AdminMentors: React.FC = () => {
     }
   };
 
-  const deleteMentor = async (id: string) => {
-    if (!confirm('Excluir mentor? Isso pode afetar produtos vinculados.')) return;
-    await supabase.from('mentors').delete().eq('id', id);
-    load();
+  const deleteMentor = async () => {
+    if (!deleteModal.id) return;
+    setDeleting(true);
+    try {
+      const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+      const res = await fetch(`${backendURL}/api/v1/admin/mentors/${deleteModal.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Erro ao excluir mentor');
+      }
+      toast.success('Mentor excluído com sucesso!');
+      load();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao excluir mentor');
+    } finally {
+      setDeleting(false);
+      setDeleteModal({ open: false, id: '', name: '' });
+    }
   };
 
   const filtered = mentors.filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase()));
@@ -178,13 +197,12 @@ const AdminMentors: React.FC = () => {
                       <button onClick={() => openEdit(m)} className="rounded-lg p-2 text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors touch-manipulation">
                         <Edit className="h-4 w-4" />
                       </button>
-                      <button onClick={() => deleteMentor(m.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors touch-manipulation">
+                      <button onClick={() => setDeleteModal({ open: true, id: m.id, name: m.name })} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors touch-manipulation">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
 
-                  {/* Login URL or slug warning */}
                   {m.slug ? (
                     <div className="flex items-center gap-2">
                       <code className="flex-1 truncate rounded-xl bg-surface border border-border px-3 py-2 text-xs font-mono text-muted-foreground">
@@ -216,12 +234,12 @@ const AdminMentors: React.FC = () => {
         </div>
       </div>
 
+      {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowModal(false)}>
           <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 space-y-3" onClick={e => e.stopPropagation()}>
             <h3 className="font-display font-semibold text-foreground">{editing ? 'Editar Mentor' : 'Novo Mentor'}</h3>
             
-            {/* Nome */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Nome do mentor</label>
               <input type="text" value={form.name}
@@ -232,7 +250,6 @@ const AdminMentors: React.FC = () => {
                 className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground focus:border-primary focus:outline-none transition-colors" />
             </div>
             
-            {/* Slug */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Slug (URL)</label>
               <input type="text" value={form.slug}
@@ -243,7 +260,6 @@ const AdminMentors: React.FC = () => {
               </p>
             </div>
             
-            {/* E-mail */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">E-mail do mentor</label>
               <input type="email" value={form.email}
@@ -263,7 +279,6 @@ const AdminMentors: React.FC = () => {
               </div>
             )}
             
-            {/* Cores */}
             <div className="flex gap-4">
               <div className="flex-1">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">Cor Primária</label>
@@ -281,7 +296,6 @@ const AdminMentors: React.FC = () => {
               </div>
             </div>
             
-            {/* Stripe Account */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">ID da conta Stripe (recebimentos)</label>
               <input type="text" value={form.stripe_account_id}
@@ -291,7 +305,6 @@ const AdminMentors: React.FC = () => {
               <p className="mt-1 text-[11px] text-muted-foreground">Stripe Connect account ID do mentor — usado para repasse automático 50/50.</p>
             </div>
 
-            {/* Logo */}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Upload de logo</label>
               <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)}
@@ -312,6 +325,7 @@ const AdminMentors: React.FC = () => {
         </div>
       )}
 
+      {/* Error Modal */}
       {showErrorModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowErrorModal(false)}>
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6" onClick={e => e.stopPropagation()}>
@@ -328,6 +342,25 @@ const AdminMentors: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={deleteModal.open} onOpenChange={(open) => !open && setDeleteModal({ open: false, id: '', name: '' })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir mentor</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir <strong>{deleteModal.name}</strong>? Todos os produtos, disciplinas e cards vinculados serão removidos permanentemente.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteModal({ open: false, id: '', name: '' })}>Cancelar</Button>
+            <Button variant="destructive" onClick={deleteMentor} disabled={deleting}>
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 };

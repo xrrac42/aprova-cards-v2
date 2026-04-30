@@ -96,6 +96,9 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	}
 	api.POST("/admin/mentors/provision", handlers.NewMentorHandler(usecases.NewMentorUseCase(mentorRepo), adminMentorUC, supabaseAdminClient).CreateProvisioned)
 
+	adminMentorHandler := handlers.NewMentorHandler(usecases.NewMentorUseCase(mentorRepo), adminMentorUC, supabaseAdminClient)
+	api.DELETE("/admin/mentors/:id", adminMentorHandler.Delete)
+
 	productRepo := repositories.NewProductRepository(db)
 	discRepoForProducts := repositories.NewDisciplineRepository(db)
 	productUC := usecases.NewProductUseCase(productRepo, discRepoForProducts)

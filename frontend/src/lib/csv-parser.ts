@@ -110,6 +110,14 @@ export function parseTXT(content: string): { cards: ParsedCard[]; format: Detect
       if (front && back) cards.push({ front, back });
       format = 'CSV (separador ;)';
     }
+
+    if (cards.length === 0 && line.includes(' | ')) {
+      const idx = line.indexOf(' | ');
+      const front = cleanCardText(line.substring(0, idx));
+      const back = cleanCardText(line.substring(idx + 3));
+      if (front && back) cards.push({ front, back });
+      format = 'TXT (blocos)';
+    }
   }
 
   if (cards.length === 0) {

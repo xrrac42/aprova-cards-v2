@@ -97,7 +97,7 @@ export default function PaymentSuccess() {
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-600 mb-4" />
-            <p className="text-gray-600">Processing your payment...</p>
+            <p className="text-gray-600">Processando seu pagamento...</p>
           </CardContent>
         </Card>
       </div>
@@ -110,7 +110,7 @@ export default function PaymentSuccess() {
         <Card className="w-full max-w-md border-red-200">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <AlertCircle className="h-12 w-12 text-red-600 mb-4" />
-            <h1 className="text-2xl font-bold text-red-600 mb-2">Payment Error</h1>
+            <h1 className="text-2xl font-bold text-red-600 mb-2">Erro no pagamento</h1>
             <p className="text-gray-600 text-center mb-6">{data.error}</p>
             <Button onClick={() => navigate('/')} variant="outline">
               Go Home
@@ -130,7 +130,7 @@ export default function PaymentSuccess() {
             <CardTitle>Payment Successful!</CardTitle>
           </div>
           <CardDescription className="text-green-50">
-            Your access has been activated
+            Seu produto foi ativado
           </CardDescription>
         </CardHeader>
 
@@ -166,19 +166,19 @@ export default function PaymentSuccess() {
 
           {/* Next Steps */}
           <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-            <p className="font-semibold text-gray-900 text-sm">Next Steps:</p>
+            <p className="font-semibold text-gray-900 text-sm">Próximos Passos:</p>
             <ol className="text-sm space-y-2 text-gray-700">
               <li className="flex gap-2">
                 <span className="text-indigo-600 font-bold">1.</span>
-                <span>Check your email for the welcome message with your login link</span>
+                <span>Cheque seu email para instruções de login</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-indigo-600 font-bold">2.</span>
-                <span>Log in to access your study materials and start learning</span>
+                <span>Faca login para acessar seus materiais de estudo e começar a aprender</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-indigo-600 font-bold">3.</span>
-                <span>Explore your courses and track your progress</span>
+                <span>Explore seus cursos e acompanhe seu progresso</span>
               </li>
             </ol>
           </div>
@@ -189,7 +189,7 @@ export default function PaymentSuccess() {
               onClick={() => navigate('/')}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700"
             >
-              Back to Home
+            Início
             </Button>
             <Button
               onClick={() => {
@@ -199,13 +199,13 @@ export default function PaymentSuccess() {
               variant="outline"
               className="flex-1"
             >
-              Start Learning
+              Começar a estudar!
             </Button>
           </div>
 
           {/* Support Message */}
           <div className="border-t pt-4 text-center text-xs text-gray-500">
-            <p>Have questions? Contact support or your mentor for assistance.</p>
+            <p>Duvidas? Entre em contato com o suporte ou seu mentor para assistencia.</p>
           </div>
         </CardContent>
       </Card>

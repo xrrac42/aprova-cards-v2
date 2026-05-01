@@ -58,8 +58,11 @@ jobs:
             echo "📦 Installing frontend dependencies..."
             cd frontend
             npm ci --ignore-scripts 2>/dev/null || npm install
+            
             echo "🔨 Building frontend..."
-            npm run build
+            # 🚀 INJEÇÃO DAS VARIÁVEIS DIRETO NA VEIA:
+            VITE_BACKEND_URL="http://${{ secrets.DEPLOY_HOST }}:8080" VITE_API_BASE_URL="http://${{ secrets.DEPLOY_HOST }}:8080/api/v1" npm run build
+            
             cd ..
 
             echo "🔨 Building backend..."
@@ -68,7 +71,7 @@ jobs:
             CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/aprova-cards ./cmd/server/main.go
             cd ..
 
-             echo "🔄 Restarting services..."
+            echo "🔄 Restarting services..."
             if [ -f /tmp/aprova-backend.pid ]; then
               kill $(cat /tmp/aprova-backend.pid) 2>/dev/null || true
             fi

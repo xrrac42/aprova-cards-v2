@@ -14,7 +14,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const BATCH_SIZE = 500;
 
-const CORRUPT_START_CHARS = /^[;'">\|\\\/\[\]\{\}#@\^~`]/;
+const CORRUPT_START_CHARS = /^[\\\/\[\]\{\}@\^~`]{2,}/;
 
 function isCorruptedCard(card: ParsedCard): boolean {
   return CORRUPT_START_CHARS.test(card.front.trim()) || CORRUPT_START_CHARS.test(card.back.trim());

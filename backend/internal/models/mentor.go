@@ -15,6 +15,7 @@ type Mentor struct {
 	LogoURL         *string   `json:"logo_url"`
 	PrimaryColor    string    `gorm:"not null;default:'#6c63ff'" json:"primary_color"`
 	SecondaryColor  string    `gorm:"not null;default:'#43e97b'" json:"secondary_color"`
+	AccentColor     *string   `gorm:"default:'#ffd166'" json:"accent_color"`
 	RevenueShare    float64   `gorm:"not null;default:50.00" json:"revenue_share"`
 	StripeAccountID *string   `gorm:"uniqueIndex" json:"stripe_account_id"`
 	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`

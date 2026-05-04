@@ -102,6 +102,9 @@ func (uc *mentorUseCase) Update(id string, req *dto.UpdateMentorRequest) (*dto.M
 	if req.SecondaryColor != "" {
 		entity.SecondaryColor = req.SecondaryColor
 	}
+	if req.AccentColor != nil {
+		entity.AccentColor = req.AccentColor
+	}
 	if req.LogoURL != nil {
 		entity.LogoURL = req.LogoURL
 	}
@@ -120,6 +123,7 @@ func mentorToDTO(e *models.Mentor) *dto.MentorResponse {
 		ID: e.ID, Name: e.Name, Email: e.Email, Slug: e.Slug,
 		LogoURL: e.LogoURL, PrimaryColor: e.PrimaryColor,
 		SecondaryColor: e.SecondaryColor,
+		AccentColor:    e.AccentColor,
 		CreatedAt:      e.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }

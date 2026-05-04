@@ -18,6 +18,7 @@ type UpdateMentorRequest struct {
 	Slug            string  `json:"slug"`
 	PrimaryColor    string  `json:"primary_color"`
 	SecondaryColor  string  `json:"secondary_color"`
+	AccentColor     *string `json:"accent_color"`
 	LogoURL         *string `json:"logo_url"`
 	StripeAccountID *string `json:"stripe_account_id"`
 }
@@ -30,6 +31,7 @@ type MentorResponse struct {
 	LogoURL         *string `json:"logo_url"`
 	PrimaryColor    string  `json:"primary_color"`
 	SecondaryColor  string  `json:"secondary_color"`
+	AccentColor     *string `json:"accent_color"`
 	RevenueShare    float64 `json:"revenue_share"`
 	StripeAccountID *string `json:"stripe_account_id"`
 	CreatedAt       string  `json:"created_at"`

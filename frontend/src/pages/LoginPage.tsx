@@ -38,18 +38,13 @@ const resolveLogoUrl = (logoUrl: string | null | undefined) => {
 
 const inferSlugFromHostname = () => {
   if (typeof window === 'undefined') return '';
-
   const host = window.location.hostname.toLowerCase();
   if (!host || host === 'localhost' || host === '127.0.0.1') return '';
-
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return '';
-
   const parts = host.split('.');
-  if (parts.length < 3) return '';
-
+  if (parts.length < 4) return '';
   const subdomain = parts[0];
   if (!subdomain || subdomain === 'www') return '';
-
   return normalizeSlug(subdomain);
 };
 

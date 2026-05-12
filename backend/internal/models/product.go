@@ -8,14 +8,15 @@ import (
 )
 
 type Product struct {
-	ID              string    `gorm:"primaryKey;type:uuid" json:"id"`
-	MentorID        string    `gorm:"not null;type:uuid" json:"mentor_id"`
-	Name            string    `gorm:"not null" json:"name"`
-	AccessCode      string    `gorm:"uniqueIndex;not null" json:"access_code"`
-	Active          bool      `gorm:"not null;default:true" json:"active"`
-	CoverImageURL   *string   `json:"cover_image_url"`
-	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
-	Mentor          *Mentor   `gorm:"foreignKey:MentorID" json:"mentor,omitempty"`
+	ID            string    `gorm:"primaryKey;type:uuid" json:"id"`
+	MentorID      string    `gorm:"not null;type:uuid" json:"mentor_id"`
+	Name          string    `gorm:"not null" json:"name"`
+	AccessCode    string    `gorm:"uniqueIndex;not null" json:"access_code"`
+	Active        bool      `gorm:"not null;default:true" json:"active"`
+	CoverImageURL *string   `json:"cover_image_url"`
+	PaymentLink   *string   `gorm:"type:text" json:"payment_link"`
+	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
+	Mentor        *Mentor   `gorm:"foreignKey:MentorID" json:"mentor,omitempty"`
 }
 
 func (p *Product) BeforeCreate(tx *gorm.DB) error {

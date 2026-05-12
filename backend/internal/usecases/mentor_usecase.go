@@ -108,6 +108,9 @@ func (uc *mentorUseCase) Update(id string, req *dto.UpdateMentorRequest) (*dto.M
 	if req.LogoURL != nil {
 		entity.LogoURL = req.LogoURL
 	}
+	if req.KiwifyToken != nil {
+		entity.KiwifyToken = req.KiwifyToken
+	}
 	if err := uc.repo.Update(entity); err != nil {
 		return nil, err
 	}
@@ -122,8 +125,10 @@ func mentorToDTO(e *models.Mentor) *dto.MentorResponse {
 	return &dto.MentorResponse{
 		ID: e.ID, Name: e.Name, Email: e.Email, Slug: e.Slug,
 		LogoURL: e.LogoURL, PrimaryColor: e.PrimaryColor,
-		SecondaryColor: e.SecondaryColor,
-		AccentColor:    e.AccentColor,
-		CreatedAt:      e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		SecondaryColor:  e.SecondaryColor,
+		AccentColor:     e.AccentColor,
+		StripeAccountID: e.StripeAccountID,
+		KiwifyToken:     e.KiwifyToken,
+		CreatedAt:       e.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }

@@ -29,7 +29,7 @@ func (uc *productUseCase) Create(req *dto.CreateProductRequest) (*dto.ProductRes
 	if req.Active != nil {
 		active = *req.Active
 	}
-	entity := &models.Product{MentorID: req.MentorID, Name: req.Name, AccessCode: req.AccessCode, Active: active, CoverImageURL: req.CoverImageURL}
+	entity := &models.Product{MentorID: req.MentorID, Name: req.Name, AccessCode: req.AccessCode, Active: active, CoverImageURL: req.CoverImageURL, PaymentLink: req.PaymentLink}
 	if err := uc.repo.Create(entity); err != nil {
 		return nil, err
 	}
@@ -113,6 +113,9 @@ func (uc *productUseCase) Update(id string, req *dto.UpdateProductRequest) (*dto
 	if req.CoverImageURL != nil {
 		e.CoverImageURL = req.CoverImageURL
 	}
+	if req.PaymentLink != nil {
+		e.PaymentLink = req.PaymentLink
+	}
 	if err := uc.repo.Update(e); err != nil {
 		return nil, err
 	}
@@ -122,5 +125,5 @@ func (uc *productUseCase) Update(id string, req *dto.UpdateProductRequest) (*dto
 func (uc *productUseCase) Delete(id string) error { return uc.repo.Delete(id) }
 
 func productToDTO(e *models.Product) *dto.ProductResponse {
-	return &dto.ProductResponse{ID: e.ID, MentorID: e.MentorID, Name: e.Name, AccessCode: e.AccessCode, Active: e.Active, CoverImageURL: e.CoverImageURL, CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z")}
+	return &dto.ProductResponse{ID: e.ID, MentorID: e.MentorID, Name: e.Name, AccessCode: e.AccessCode, Active: e.Active, CoverImageURL: e.CoverImageURL, PaymentLink: e.PaymentLink, CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z")}
 }

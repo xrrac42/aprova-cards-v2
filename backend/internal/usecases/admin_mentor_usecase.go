@@ -82,6 +82,7 @@ func (uc *adminMentorUseCase) CreateMentorByAdmin(req *dto.CreateMentorRequest, 
 		LogoURL:         req.LogoURL,
 		RevenueShare:    revenueShare,
 		StripeAccountID: req.StripeAccountID,
+		KiwifyToken:     req.KiwifyToken,
 	}
 	if mentor.PrimaryColor == "" {
 		mentor.PrimaryColor = "#6c63ff"
@@ -144,6 +145,7 @@ func (uc *adminMentorUseCase) CreateMentorByAdmin(req *dto.CreateMentorRequest, 
 		SecondaryColor:  mentor.SecondaryColor,
 		RevenueShare:    mentor.RevenueShare,
 		StripeAccountID: mentor.StripeAccountID,
+		KiwifyToken:     mentor.KiwifyToken,
 		CreatedAt:       mentor.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }

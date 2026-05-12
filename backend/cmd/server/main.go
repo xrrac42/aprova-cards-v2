@@ -156,25 +156,22 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	studentSignUpUC := usecases.NewStudentSignUpUseCase(
 		db, invitationRepo, mentorRepo, productRepo0, paymentRepo0, studentAccessRepo0,
 		nil, supabaseAdminClient,
-		cfg.Stripe.SecretKey, cfg.FrontendURL,
 	)
 	studentSignUpHandler := handlers.NewStudentSignUpHandler(studentSignUpUC)
 
-	api.POST("/invite/checkout", studentSignUpHandler.CreateCheckoutSession)
 	api.POST("/invite/validate", studentSignUpHandler.ValidateInviteCode)
 	api.POST("/auth/signup/initiate", studentSignUpHandler.InitiateStudentSignUp)
 
-	// ---- Stripe webhook (public, no JWT) ----
-	paymentUC := usecases.NewPaymentUseCase(paymentRepo0, mentorRepo, productRepo0, cfg.Stripe)
-	stripeWebhookHandler := handlers.NewStripeWebhookHandler(paymentUC, studentSignUpUC)
-	api.POST("/webhooks/stripe", stripeWebhookHandler.HandleWebhookEvent)
+	// ---- Kiwify webhook (public, no JWT) ----
+	kiwifyWebhookHandler := handlers.NewKiwifyWebhookHandler(studentSignUpUC)
+	api.POST("/webhooks/kiwify", kiwifyWebhookHandler.HandleWebhookEvent)
 
 	// ---- Checkout routes (public) ----
 	emailService := emailsvc.NewEmailService(cfg.Email.SMTPHost, cfg.Email.SMTPPort, cfg.Email.From, cfg.Email.Password)
 	mentorUC0 := usecases.NewMentorUseCase(mentorRepo)
 	productUC0 := usecases.NewProductUseCase(productRepo0, discRepoForProducts)
-	checkoutHandler := handlers.NewCheckoutHandler(studentSignUpUC, productUC0, mentorUC0, emailService, cfg.Stripe.SecretKey, cfg.FrontendURL)
-	api.GET("/checkout/session-info", checkoutHandler.GetSessionInfo)
+	_ = usecases.NewPaymentUseCase(paymentRepo0, mentorRepo, productRepo0)
+	checkoutHandler := handlers.NewCheckoutHandler(studentSignUpUC, productUC0, mentorUC0, emailService, cfg.FrontendURL)
 	api.POST("/welcome-email", checkoutHandler.SendWelcomeEmail)
 
 	// ---- Protected routes (JWT required) ----

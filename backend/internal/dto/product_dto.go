@@ -6,6 +6,7 @@ type CreateProductRequest struct {
 	AccessCode    string  `json:"access_code" binding:"required,min=4"`
 	Active        *bool   `json:"active"`
 	CoverImageURL *string `json:"cover_image_url"`
+	PaymentLink   *string `json:"payment_link"`
 }
 
 type UpdateProductRequest struct {
@@ -13,6 +14,7 @@ type UpdateProductRequest struct {
 	AccessCode    string  `json:"access_code"`
 	Active        *bool   `json:"active"`
 	CoverImageURL *string `json:"cover_image_url"`
+	PaymentLink   *string `json:"payment_link"`
 }
 
 type ProductResponse struct {
@@ -22,5 +24,6 @@ type ProductResponse struct {
 	AccessCode    string  `json:"access_code"`
 	Active        bool    `json:"active"`
 	CoverImageURL *string `json:"cover_image_url"`
+	PaymentLink   *string `json:"payment_link"`
 	CreatedAt     string  `json:"created_at"`
 }

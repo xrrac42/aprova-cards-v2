@@ -20,6 +20,7 @@ const CreateProduct: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [coverImageUrl, setCoverImageUrl] = useState('');
+  const [paymentLink, setPaymentLink] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,7 +66,8 @@ const CreateProduct: React.FC = () => {
     setAccessCode(data.access_code);
     setMentorId(data.mentor_id);
     setActive(data.active);
-    setCoverImageUrl((data as any).cover_image_url || '');
+    setCoverImageUrl(data.cover_image_url || '');
+    setPaymentLink(data.payment_link || '');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -86,6 +88,7 @@ const CreateProduct: React.FC = () => {
         mentor_id: mentorId,
         active,
         cover_image_url: coverImageUrl || null,
+        payment_link: paymentLink || null,
       };
 
       const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
@@ -207,6 +210,18 @@ const CreateProduct: React.FC = () => {
               className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors font-mono"
               placeholder="Ex: PMGO2025"
             />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Link de pagamento (Kiwify)</label>
+            <input
+              type="url"
+              value={paymentLink}
+              onChange={(e) => setPaymentLink(e.target.value)}
+              className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
+              placeholder="https://pay.kiwify.com.br/..."
+            />
+            <p className="mt-1 text-xs text-muted-foreground">URL da página de checkout na Kiwify para este produto</p>
           </div>
 
           <div>

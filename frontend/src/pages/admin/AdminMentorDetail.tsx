@@ -46,13 +46,13 @@ const AdminMentorDetail: React.FC = () => {
 
   const hasEmail = !!mentor.email;
   const hasProducts = products.length > 0;
-  const hasStripeAccount = !!(mentor as any).stripe_account_id;
+  const hasKiwifyToken = !!(mentor as any).kiwify_token;
 
   const checks = [
     { label: 'Mentor cadastrado', ok: true, link: null },
     { label: 'E-mail configurado', ok: hasEmail, link: `/admin/mentores` },
     { label: `Produtos criados (${products.length})`, ok: hasProducts, link: `/admin/produtos` },
-    { label: 'Conta Stripe configurada (recebimentos)', ok: hasStripeAccount, link: `/admin/mentores` },
+    { label: 'Token Kiwify configurado (webhook)', ok: hasKiwifyToken, link: `/admin/mentores` },
   ];
 
   return (

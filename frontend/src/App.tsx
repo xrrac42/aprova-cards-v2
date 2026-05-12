@@ -3,10 +3,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
-import { PaymentCheckout } from "./components/PaymentCheckout";
 import { StudentSignUpFlow } from "./components/StudentSignUpFlow";
 
 // Lazy load all non-login routes
@@ -45,31 +44,7 @@ const LazyFallback = () => (
   </div>
 );
 
-const CheckoutRoute = () => {
-  const [searchParams] = useSearchParams();
-
-  // Invite-code flow: /checkout?code=xxx
-  if (searchParams.get("code")) {
-    return <StudentSignUpFlow />;
-  }
-
-  const studentEmail = searchParams.get("studentEmail");
-  const productId = searchParams.get("productId");
-  const amountCentsParam = searchParams.get("amountCents");
-  const amountCents = amountCentsParam ? Number(amountCentsParam) : NaN;
-
-  if (!studentEmail || !productId || !Number.isFinite(amountCents)) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return (
-    <PaymentCheckout
-      studentEmail={studentEmail}
-      productId={productId}
-      amountCents={amountCents}
-    />
-  );
-};
+const CheckoutRoute = () => <StudentSignUpFlow />;
 
 const App = () => (
   <ErrorBoundary>

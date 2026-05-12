@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff, ExternalLink } from 'lucide-react';
+import { Loader2, AlertCircle, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Step = 'validating' | 'form' | 'redirecting' | 'invalid';
@@ -32,15 +32,20 @@ const signUpSchema = z.object({
 
 type SignUpFormValues = z.infer<typeof signUpSchema>;
 
+interface Invitation {
+  product_name: string;
+  product_id: string;
+  payment_link: string;
+}
+
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
 export const StudentSignUpFlow: React.FC = () => {
   const [searchParams] = useSearchParams();
   const inviteCode = searchParams.get('code');
-  const amountCents = Number(searchParams.get('amount') || '9700');
 
   const [step, setStep] = useState<Step>('validating');
-  const [invitation, setInvitation] = useState<{ product_name: string; product_id: string } | null>(null);
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -64,7 +69,13 @@ export const StudentSignUpFlow: React.FC = () => {
           setStep('invalid');
           return;
         }
-        setInvitation({ product_name: data.data.product_name, product_id: data.data.product_id });
+        const { product_name, product_id, payment_link } = data.data;
+        if (!payment_link) {
+          toast.error('Configuração do produto inválida. Contate seu instrutor.');
+          setStep('invalid');
+          return;
+        }
+        setInvitation({ product_name, product_id, payment_link });
         setStep('form');
       } catch {
         setStep('invalid');
@@ -79,7 +90,6 @@ export const StudentSignUpFlow: React.FC = () => {
     setSubmitting(true);
 
     try {
-      // 1. Criar conta no Supabase
       const initiateResp = await fetch(`${BACKEND}/api/v1/auth/signup/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,28 +106,11 @@ export const StudentSignUpFlow: React.FC = () => {
         return;
       }
 
-      // 2. Criar sessão de checkout Stripe
       setStep('redirecting');
-      const checkoutResp = await fetch(`${BACKEND}/api/v1/invite/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invite_code: inviteCode,
-          amount_cents: amountCents,
-          currency: 'brl',
-        }),
-      });
-      const checkoutData = await checkoutResp.json();
-      if (!checkoutData.success || !checkoutData.data?.session_url) {
-        toast.error(checkoutData.error || 'Erro ao iniciar pagamento');
-        setStep('form');
-        return;
-      }
-
-      // 3. Redirecionar para o Stripe
-      window.location.href = checkoutData.data.session_url;
-    } catch (err: any) {
-      toast.error(err.message || 'Erro inesperado');
+      const kiwifyUrl = `${invitation.payment_link}?email=${encodeURIComponent(values.email)}&name=${encodeURIComponent(values.full_name)}`;
+      window.location.href = kiwifyUrl;
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro inesperado');
       setStep('form');
     } finally {
       setSubmitting(false);
@@ -161,7 +154,7 @@ export const StudentSignUpFlow: React.FC = () => {
             <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
             <h2 className="text-xl font-semibold">Redirecionando para o pagamento…</h2>
             <p className="text-muted-foreground text-sm">
-              Você será levado ao ambiente seguro do Stripe.
+              Você será levado ao ambiente seguro da Kiwify.
             </p>
           </CardContent>
         </Card>
@@ -263,7 +256,7 @@ export const StudentSignUpFlow: React.FC = () => {
                 <Alert>
                   <ExternalLink className="h-4 w-4" />
                   <AlertDescription className="text-xs">
-                    Após criar a conta, você será redirecionado ao Stripe para concluir o pagamento com segurança.
+                    Após criar a conta, você será redirecionado à Kiwify para concluir o pagamento com segurança.
                   </AlertDescription>
                 </Alert>
 

@@ -16,7 +16,6 @@ type Config struct {
 	CORS        CORSConfig
 	RateLimit   RateLimitConfig
 	Supabase    SupabaseConfig
-	Stripe      StripeConfig
 	OpenAI      OpenAIConfig
 	Email       EmailConfig
 	FrontendURL string
@@ -31,12 +30,6 @@ type EmailConfig struct {
 	SMTPPort string
 	From     string
 	Password string
-}
-
-type StripeConfig struct {
-	SecretKey      string
-	WebhookSecret  string
-	PublishableKey string
 }
 
 type ServerConfig struct {
@@ -110,11 +103,6 @@ func Load() *Config {
 			URL:            getEnvFirst([]string{"SUPABASE_URL", "VITE_SUPABASE_URL"}, ""),
 			ServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
 			JWTSecret:      getEnv("SUPABASE_JWT_SECRET", ""),
-		},
-		Stripe: StripeConfig{
-			SecretKey:      getEnvFirst([]string{"STRIPE_SECRET_KEY", "STRIPE_SECRET", "STRIPE_API_KEY"}, ""),
-			WebhookSecret:  getEnvFirst([]string{"STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SIGNING_SECRET"}, ""),
-			PublishableKey: getEnvFirst([]string{"STRIPE_PUBLISHABLE_KEY", "VITE_STRIPE_PUBLISHABLE_KEY"}, ""),
 		},
 		OpenAI: OpenAIConfig{
 			APIKey: getEnv("OPENAI_API_KEY", ""),

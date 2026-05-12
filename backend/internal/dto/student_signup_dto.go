@@ -59,22 +59,6 @@ type StudentSignUpResponse struct {
 	NextStep     string `json:"next_step"` // "payment" or "verify_email"
 }
 
-// CompleteStudentSignUpRequest is used after payment is approved
-type CompleteStudentSignUpRequest struct {
-	PaymentID  string `json:"payment_id" binding:"required"`
-	InviteCode string `json:"invite_code" binding:"required"`
-	Email      string `json:"email" binding:"required,email"`
-	FullName   string `json:"full_name" binding:"required"`
-}
-
-// CompleteStudentSignUpResponse contains completion result
-type CompleteStudentSignUpResponse struct {
-	StudentAuthID  string `json:"student_auth_id"`
-	Email          string `json:"email"`
-	SupabaseUserID string `json:"supabase_user_id"`
-	Message        string `json:"message"`
-	AccessToken    string `json:"access_token"` // Optional: return temp token
-}
 
 // StudentAuthResponse represents a student's auth record
 type StudentAuthResponse struct {
@@ -99,6 +83,7 @@ type ValidateInviteCodeResponse struct {
 	ProductID    string `json:"product_id,omitempty"`
 	MentorID     string `json:"mentor_id,omitempty"`
 	ProductName  string `json:"product_name,omitempty"`
+	PaymentLink  string `json:"payment_link,omitempty"`
 	Status       string `json:"status,omitempty"`
 	ExpiresAt    string `json:"expires_at,omitempty"`
 	Message      string `json:"message,omitempty"`

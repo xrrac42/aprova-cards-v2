@@ -43,6 +43,7 @@ const AdminMentors: React.FC = () => {
     primary_color: "#6c63ff",
     secondary_color: "#43e97b",
     stripe_account_id: "",
+    kiwify_token: "",
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -115,6 +116,7 @@ const AdminMentors: React.FC = () => {
       primary_color: "#6c63ff",
       secondary_color: "#43e97b",
       stripe_account_id: "",
+      kiwify_token: "",
     });
     setLogoFile(null);
     setShowModal(true);
@@ -130,6 +132,7 @@ const AdminMentors: React.FC = () => {
       primary_color: m.primary_color,
       secondary_color: m.secondary_color,
       stripe_account_id: m.stripe_account_id || "",
+      kiwify_token: m.kiwify_token || "",
     });
     setLogoFile(null);
     setShowModal(true);
@@ -162,6 +165,7 @@ const AdminMentors: React.FC = () => {
         secondary_color: form.secondary_color,
         logo_url: logoUrl,
         stripe_account_id: form.stripe_account_id || null,
+        kiwify_token: form.kiwify_token || null,
       };
       if (editing) {
         const backendURL =
@@ -202,6 +206,7 @@ const AdminMentors: React.FC = () => {
             secondary_color: form.secondary_color,
             logo_url: logoUrl,
             stripe_account_id: form.stripe_account_id || null,
+            kiwify_token: form.kiwify_token || null,
           }),
         });
 
@@ -530,23 +535,22 @@ const AdminMentors: React.FC = () => {
 
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                ID da conta Stripe (recebimentos)
+                Token Kiwify (webhook)
               </label>
               <input
                 type="text"
-                value={form.stripe_account_id}
+                value={form.kiwify_token}
                 onChange={(e) =>
                   setForm((f) => ({
                     ...f,
-                    stripe_account_id: e.target.value.trim(),
+                    kiwify_token: e.target.value.trim(),
                   }))
                 }
-                placeholder="acct_xxxxxxxxxxxxxxxx"
+                placeholder="token gerado no painel da Kiwify"
                 className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors"
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Stripe Connect account ID do mentor — usado para repasse
-                automático 50/50.
+                Token do webhook da Kiwify — usado para validar pagamentos e liberar acesso.
               </p>
             </div>
 

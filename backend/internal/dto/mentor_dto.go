@@ -10,6 +10,7 @@ type CreateMentorRequest struct {
 	LogoURL         *string `json:"logo_url"`
 	RevenueShare    float64 `json:"revenue_share" binding:"omitempty,min=0,max=100"`
 	StripeAccountID *string `json:"stripe_account_id"`
+	KiwifyToken     *string `json:"kiwify_token"`
 }
 
 type UpdateMentorRequest struct {
@@ -21,6 +22,7 @@ type UpdateMentorRequest struct {
 	AccentColor     *string `json:"accent_color"`
 	LogoURL         *string `json:"logo_url"`
 	StripeAccountID *string `json:"stripe_account_id"`
+	KiwifyToken     *string `json:"kiwify_token"`
 }
 
 type MentorResponse struct {
@@ -34,5 +36,6 @@ type MentorResponse struct {
 	AccentColor     *string `json:"accent_color"`
 	RevenueShare    float64 `json:"revenue_share"`
 	StripeAccountID *string `json:"stripe_account_id"`
+	KiwifyToken     *string `json:"kiwify_token"`
 	CreatedAt       string  `json:"created_at"`
 }

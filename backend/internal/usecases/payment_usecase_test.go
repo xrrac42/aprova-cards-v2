@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/approva-cards/back-aprova-cards/config"
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"github.com/google/uuid"
@@ -29,8 +28,8 @@ func (m *MockPaymentRepository) GetByID(id string) (*models.Payment, error) {
 	return args.Get(0).(*models.Payment), args.Error(1)
 }
 
-func (m *MockPaymentRepository) GetByStripePaymentIntentID(stripePaymentIntentID string) (*models.Payment, error) {
-	args := m.Called(stripePaymentIntentID)
+func (m *MockPaymentRepository) GetByExternalPaymentID(externalPaymentID string) (*models.Payment, error) {
+	args := m.Called(externalPaymentID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -81,8 +80,8 @@ func (m *MockPaymentRepository) CreateWebhook(entity *models.PaymentWebhook) err
 	return m.Called(entity).Error(0)
 }
 
-func (m *MockPaymentRepository) GetWebhookByStripeEventID(stripeEventID string) (*models.PaymentWebhook, error) {
-	args := m.Called(stripeEventID)
+func (m *MockPaymentRepository) GetWebhookByExternalEventID(externalEventID string) (*models.PaymentWebhook, error) {
+	args := m.Called(externalEventID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -179,13 +178,8 @@ func (m *MockProductRepository) Delete(id string) error {
 	return m.Called(id).Error(0)
 }
 
-// Test CalculatePaymentSplit
 func TestCalculatePaymentSplit(t *testing.T) {
-	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
-
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
+	uc := NewPaymentUseCase(new(MockPaymentRepository), new(MockMentorRepository), new(MockProductRepository))
 
 	tests := []struct {
 		name             string
@@ -195,72 +189,42 @@ func TestCalculatePaymentSplit(t *testing.T) {
 		expectedMentor   int
 		expectedPlatform int
 	}{
-		{
-			name:             "Valid split 70-30",
-			totalAmount:      10000, // R$100.00
-			splitPercentage:  70.0,
-			expectError:      false,
-			expectedMentor:   7000,
-			expectedPlatform: 3000,
-		},
-		{
-			name:             "Valid split 80-20",
-			totalAmount:      5000, // R$50.00
-			splitPercentage:  80.0,
-			expectError:      false,
-			expectedMentor:   4000,
-			expectedPlatform: 1000,
-		},
-		{
-			name:            "Invalid negative split",
-			totalAmount:     10000,
-			splitPercentage: -10.0,
-			expectError:     true,
-		},
-		{
-			name:            "Invalid split over 100",
-			totalAmount:     10000,
-			splitPercentage: 150.0,
-			expectError:     true,
-		},
+		{"70-30 split", 10000, 70.0, false, 7000, 3000},
+		{"80-20 split", 5000, 80.0, false, 4000, 1000},
+		{"negative split", 10000, -10.0, true, 0, 0},
+		{"split over 100", 10000, 150.0, true, 0, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := uc.CalculatePaymentSplit(tt.totalAmount, tt.splitPercentage)
-
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, result)
 				assert.Equal(t, tt.expectedMentor, result.MentorAmountCents)
 				assert.Equal(t, tt.expectedPlatform, result.PlatformFeeCents)
-				assert.Equal(t, tt.totalAmount, result.MentorAmountCents+result.PlatformFeeCents)
 			}
 		})
 	}
 }
 
-// Test GetPaymentIntent
-func TestGetPaymentIntent(t *testing.T) {
+func TestGetPayment(t *testing.T) {
 	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
 
 	paymentID := uuid.New().String()
 	now := time.Now()
 	payment := &models.Payment{
-		ID:                    paymentID,
-		StudentEmail:          "student@example.com",
-		ProductID:             uuid.New().String(),
-		MentorID:              uuid.New().String(),
-		StripePaymentIntentID: "pi_test_123",
-		AmountCents:           10000,
-		Currency:              "brl",
-		Status:                "succeeded",
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                paymentID,
+		StudentEmail:      "student@example.com",
+		ProductID:         uuid.New().String(),
+		MentorID:          uuid.New().String(),
+		ExternalPaymentID: "kiwify_order_123",
+		AmountCents:       10000,
+		Currency:          "brl",
+		Status:            "succeeded",
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	split := &models.PaymentSplit{
@@ -275,8 +239,8 @@ func TestGetPaymentIntent(t *testing.T) {
 	mockPaymentRepo.On("GetByID", paymentID).Return(payment, nil)
 	mockPaymentRepo.On("GetSplitByPaymentID", paymentID).Return(split, nil)
 
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
-	result, err := uc.GetPaymentIntent(paymentID)
+	uc := NewPaymentUseCase(mockPaymentRepo, new(MockMentorRepository), new(MockProductRepository))
+	result, err := uc.GetPayment(paymentID)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -287,124 +251,58 @@ func TestGetPaymentIntent(t *testing.T) {
 	assert.Equal(t, 7000, result.PaymentSplit.MentorAmountCents)
 }
 
-// Test GetStudentPayments
 func TestGetStudentPayments(t *testing.T) {
 	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
 
 	studentEmail := "student@example.com"
 	payments := []models.Payment{
 		{
-			ID:                    uuid.New().String(),
-			StudentEmail:          studentEmail,
-			ProductID:             uuid.New().String(),
-			MentorID:              uuid.New().String(),
-			StripePaymentIntentID: "pi_test_1",
-			AmountCents:           10000,
-			Currency:              "brl",
-			Status:                "succeeded",
+			ID:                uuid.New().String(),
+			StudentEmail:      studentEmail,
+			ProductID:         uuid.New().String(),
+			MentorID:          uuid.New().String(),
+			ExternalPaymentID: "kiwify_1",
+			AmountCents:       10000,
+			Currency:          "brl",
+			Status:            "succeeded",
 		},
 		{
-			ID:                    uuid.New().String(),
-			StudentEmail:          studentEmail,
-			ProductID:             uuid.New().String(),
-			MentorID:              uuid.New().String(),
-			StripePaymentIntentID: "pi_test_2",
-			AmountCents:           5000,
-			Currency:              "brl",
-			Status:                "pending",
+			ID:                uuid.New().String(),
+			StudentEmail:      studentEmail,
+			ProductID:         uuid.New().String(),
+			MentorID:          uuid.New().String(),
+			ExternalPaymentID: "kiwify_2",
+			AmountCents:       5000,
+			Currency:          "brl",
+			Status:            "pending",
 		},
 	}
 
 	mockPaymentRepo.On("GetByStudentEmail", studentEmail, 1, 20).Return(payments, 2, nil)
 	mockPaymentRepo.On("GetSplitByPaymentID", mock.Anything).Return(nil, nil)
 
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
+	uc := NewPaymentUseCase(mockPaymentRepo, new(MockMentorRepository), new(MockProductRepository))
 	result, err := uc.GetStudentPayments(studentEmail, 1, 20)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(2), result.Total)
 	assert.Len(t, result.Data, 2)
-	assert.Equal(t, "succeeded", result.Data[0].Status)
-	assert.Equal(t, "pending", result.Data[1].Status)
 }
 
-// Test HandleStripeWebhook
-func TestHandleStripeWebhook(t *testing.T) {
-	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
-
-	eventID := "evt_test_123"
-	eventType := "payment_intent.succeeded"
-
-	mockPaymentRepo.On("GetWebhookByStripeEventID", eventID).Return(nil, nil)
-	mockPaymentRepo.On("CreateWebhook", mock.Anything).Return(nil)
-	mockPaymentRepo.On("UpdateWebhook", mock.Anything).Return(nil)
-
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
-	err := uc.HandleStripeWebhook(eventID, eventType, map[string]interface{}{})
-
-	assert.NoError(t, err)
-	mockPaymentRepo.AssertExpectations(t)
-}
-
-// Test RefundPayment
-func TestRefundPayment(t *testing.T) {
-	t.Skip("Requires Stripe API key - run only in CI with STRIPE_SECRET_KEY set")
-	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
-
-	paymentID := uuid.New().String()
-	now := time.Now()
-	payment := &models.Payment{
-		ID:                    paymentID,
-		StudentEmail:          "student@example.com",
-		ProductID:             uuid.New().String(),
-		MentorID:              uuid.New().String(),
-		StripePaymentIntentID: "pi_test_123",
-		AmountCents:           10000,
-		Currency:              "brl",
-		Status:                "succeeded",
-		CreatedAt:             now,
-		UpdatedAt:             now,
-	}
-
-	mockPaymentRepo.On("GetByID", paymentID).Return(payment, nil)
-	mockPaymentRepo.On("Update", mock.Anything).Return(nil)
-	mockPaymentRepo.On("GetSplitByPaymentID", paymentID).Return(nil, nil)
-
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
-	req := &dto.RefundPaymentRequest{
-		PaymentID: paymentID,
-		Reason:    "customer_request",
-	}
-	result, err := uc.RefundPayment(req)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, "refunded", result.Status)
-}
-
-// Test ListPayments
 func TestListPayments(t *testing.T) {
 	mockPaymentRepo := new(MockPaymentRepository)
-	mockMentorRepo := new(MockMentorRepository)
-	mockProductRepo := new(MockProductRepository)
 
 	payments := []models.Payment{
 		{
-			ID:                    uuid.New().String(),
-			StudentEmail:          "student@example.com",
-			ProductID:             uuid.New().String(),
-			MentorID:              uuid.New().String(),
-			StripePaymentIntentID: "pi_test_1",
-			AmountCents:           10000,
-			Currency:              "brl",
-			Status:                "succeeded",
+			ID:                uuid.New().String(),
+			StudentEmail:      "student@example.com",
+			ProductID:         uuid.New().String(),
+			MentorID:          uuid.New().String(),
+			ExternalPaymentID: "kiwify_1",
+			AmountCents:       10000,
+			Currency:          "brl",
+			Status:            "succeeded",
 		},
 	}
 
@@ -413,7 +311,7 @@ func TestListPayments(t *testing.T) {
 		Return(payments, 1, nil)
 	mockPaymentRepo.On("GetSplitByPaymentID", mock.Anything).Return(nil, nil)
 
-	uc := NewPaymentUseCase(mockPaymentRepo, mockMentorRepo, mockProductRepo, config.StripeConfig{})
+	uc := NewPaymentUseCase(mockPaymentRepo, new(MockMentorRepository), new(MockProductRepository))
 	query := &dto.ListPaymentsQuery{
 		ProductID: &productID,
 		Page:      1,

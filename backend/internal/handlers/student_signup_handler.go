@@ -112,42 +112,6 @@ func (h *StudentSignUpHandler) InitiateStudentSignUp(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result, Message: "Sign up initiated"})
 }
 
-// CompleteStudentSignUp completes the signup after payment is approved
-// POST /auth/signup/complete
-func (h *StudentSignUpHandler) CompleteStudentSignUp(c *gin.Context) {
-	var req dto.CompleteStudentSignUpRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
-		return
-	}
-
-	result, err := h.usecase.CompleteStudentSignUp(&req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, dto.APIResponse{Success: true, Data: result, Message: "Sign up completed"})
-}
-
-// CreateCheckoutSession creates a Stripe Checkout Session for the student invite flow.
-// POST /invite/checkout
-func (h *StudentSignUpHandler) CreateCheckoutSession(c *gin.Context) {
-	var req dto.CreateCheckoutSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
-		return
-	}
-
-	result, err := h.usecase.CreateCheckoutSession(&req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result})
-}
-
 // GetStudentAuth retrieves student auth information
 // GET /auth/student/:email
 func (h *StudentSignUpHandler) GetStudentAuth(c *gin.Context) {

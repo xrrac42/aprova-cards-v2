@@ -11,7 +11,7 @@ type PaymentRepository interface {
 	// Payment operations
 	Create(entity *models.Payment) error
 	GetByID(id string) (*models.Payment, error)
-	GetByStripePaymentIntentID(stripePaymentIntentID string) (*models.Payment, error)
+	GetByExternalPaymentID(stripePaymentIntentID string) (*models.Payment, error)
 	GetByStudentEmail(email string, page, pageSize int) ([]models.Payment, int64, error)
 	GetByProductID(productID string, page, pageSize int) ([]models.Payment, int64, error)
 	Update(entity *models.Payment) error
@@ -25,7 +25,7 @@ type PaymentRepository interface {
 
 	// PaymentWebhook operations
 	CreateWebhook(entity *models.PaymentWebhook) error
-	GetWebhookByStripeEventID(stripeEventID string) (*models.PaymentWebhook, error)
+	GetWebhookByExternalEventID(stripeEventID string) (*models.PaymentWebhook, error)
 	GetPendingWebhooks(limit int) ([]models.PaymentWebhook, error)
 	UpdateWebhook(entity *models.PaymentWebhook) error
 }
@@ -53,9 +53,9 @@ func (r *paymentRepository) GetByID(id string) (*models.Payment, error) {
 	return &payment, nil
 }
 
-func (r *paymentRepository) GetByStripePaymentIntentID(stripePaymentIntentID string) (*models.Payment, error) {
+func (r *paymentRepository) GetByExternalPaymentID(stripePaymentIntentID string) (*models.Payment, error) {
 	var payment models.Payment
-	if err := r.db.First(&payment, "stripe_payment_intent_id = ?", stripePaymentIntentID).Error; err != nil {
+	if err := r.db.First(&payment, "external_payment_id = ?", stripePaymentIntentID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -173,9 +173,9 @@ func (r *paymentRepository) CreateWebhook(entity *models.PaymentWebhook) error {
 	return r.db.Create(entity).Error
 }
 
-func (r *paymentRepository) GetWebhookByStripeEventID(stripeEventID string) (*models.PaymentWebhook, error) {
+func (r *paymentRepository) GetWebhookByExternalEventID(stripeEventID string) (*models.PaymentWebhook, error) {
 	var webhook models.PaymentWebhook
-	if err := r.db.First(&webhook, "stripe_event_id = ?", stripeEventID).Error; err != nil {
+	if err := r.db.First(&webhook, "external_event_id = ?", stripeEventID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}

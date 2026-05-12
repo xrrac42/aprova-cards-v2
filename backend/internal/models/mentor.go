@@ -18,6 +18,7 @@ type Mentor struct {
 	AccentColor     *string   `gorm:"default:'#ffd166'" json:"accent_color"`
 	RevenueShare    float64   `gorm:"not null;default:50.00" json:"revenue_share"`
 	StripeAccountID *string   `gorm:"uniqueIndex" json:"stripe_account_id"`
+	KiwifyToken     *string   `gorm:"type:text" json:"kiwify_token"`
 	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 

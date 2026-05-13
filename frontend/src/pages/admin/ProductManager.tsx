@@ -120,11 +120,12 @@ const ProductManager: React.FC = () => {
 
       // Fetch disciplines from backend (fallback to protected route for older server builds)
       let resp = await fetch(
-        `${backendURL}/api/v1/admin/products/${productId}/disciplines`,
+        `https://177.7.37.215:8080/api/v1/admin/products/${productId}/disciplines`,
       );
       if (resp.status === 404) {
         resp = await fetch(
-          `${backendURL}/api/v1/products/${productId}/disciplines`,
+        `https://177.7.37.215:8080/api/v1/admin/products/${productId}/disciplines`,
+
         );
       }
       if (!resp.ok) {

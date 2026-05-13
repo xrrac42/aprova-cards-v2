@@ -120,11 +120,11 @@ const ProductManager: React.FC = () => {
 
       // Fetch disciplines from backend (fallback to protected route for older server builds)
       let resp = await fetch(
-        `https://177.7.37.215:8080/api/v1/admin/products/${productId}/disciplines`,
+        `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
       );
       if (resp.status === 404) {
         resp = await fetch(
-        `https://177.7.37.215:8080/api/v1/admin/products/${productId}/disciplines`,
+        `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
 
         );
       }

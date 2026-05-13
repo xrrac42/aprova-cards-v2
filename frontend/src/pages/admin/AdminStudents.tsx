@@ -21,8 +21,16 @@ const AdminStudents: React.FC = () => {
   const [importMentorId, setImportMentorId] = useState('');
   const [importProductId, setImportProductId] = useState('');
   const [importEmails, setImportEmails] = useState('');
+  const [importPassword, setImportPassword] = useState('PMGO26');
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ type: 'success' | 'error'; message: string; count?: number } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    type: 'success' | 'error' | 'partial';
+    message: string;
+    total?: number;
+    success?: number;
+    failed?: number;
+    results?: { email: string; success: boolean; error?: string }[];
+  } | null>(null);
   const [accessSearch, setAccessSearch] = useState('');
 
   const [accessList, setAccessList] = useState<any[]>([]);
@@ -132,7 +140,7 @@ const AdminStudents: React.FC = () => {
   }, []);
 
   const handleBulkImport = async () => {
-    if (!importProductId || !importEmails.trim()) return;
+    if (!importProductId || !importEmails.trim() || !importPassword.trim()) return;
 
     setImporting(true);
     setImportResult(null);
@@ -148,23 +156,41 @@ const AdminStudents: React.FC = () => {
       return;
     }
 
-    const registros = emails.map(email => ({
-      email: email.toLowerCase().trim(),
-      product_id: importProductId,
-      active: true,
-    }));
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
-    const { error } = await supabase
-      .from('student_access')
-      .upsert(registros, { onConflict: 'email,product_id' });
+    try {
+      const res = await fetch(`${backendURL}/api/v1/admin/students/bulk-signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          mentor_id: importMentorId,
+          product_id: importProductId,
+          default_password: importPassword.trim(),
+          emails,
+        }),
+      });
 
-    if (error) {
-      console.error('Erro ao salvar alunos:', error);
-      setImportResult({ type: 'error', message: `Erro do banco: ${error.message}` });
-    } else {
-      setImportResult({ type: 'success', message: `Importação concluída!`, count: emails.length });
-      setImportEmails('');
-      await loadAccessList(importProductId);
+      const json = await res.json();
+
+      if (!res.ok) {
+        setImportResult({ type: 'error', message: json.error || 'Erro no servidor.' });
+      } else {
+        const { total, success, failed, results } = json.data;
+        const type = failed === 0 ? 'success' : success === 0 ? 'error' : 'partial';
+        setImportResult({ type, message: '', total, success, failed, results });
+        if (success > 0) {
+          setImportEmails('');
+          await loadAccessList(importProductId);
+          await load();
+        }
+      }
+    } catch (err: any) {
+      setImportResult({ type: 'error', message: err.message || 'Erro de rede.' });
     }
 
     setImporting(false);
@@ -281,6 +307,18 @@ const AdminStudents: React.FC = () => {
               </div>
 
                 <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Senha padrão</label>
+                  <input
+                    type="text"
+                    value={importPassword}
+                    onChange={e => setImportPassword(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none transition-colors"
+                    placeholder="Ex: PMGO26"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">Todos os alunos receberão esta senha inicial.</p>
+                </div>
+
+                <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">E-mails (um por linha)</label>
                   <textarea
                     value={importEmails}
@@ -297,25 +335,35 @@ const AdminStudents: React.FC = () => {
                 </div>
 
                 {importResult && (
-                  <div className={`rounded-xl px-4 py-3 text-sm ${
+                  <div className={`rounded-xl px-4 py-3 text-sm space-y-2 ${
                     importResult.type === 'success'
                       ? 'bg-secondary/10 border border-secondary/20 text-secondary'
+                      : importResult.type === 'partial'
+                      ? 'bg-primary/10 border border-primary/20 text-primary'
                       : 'bg-destructive/10 border border-destructive/20 text-destructive'
                   }`}>
-                    {importResult.type === 'success' ? (
-                      <div className="flex items-center gap-2">
-                        <Check className="h-4 w-4 shrink-0" />
-                        <div>
-                          <p className="font-medium">{importResult.message}</p>
-                          <p className="text-xs opacity-80 mt-0.5">
-                            {importResult.count} e-mail(s) processados · Lista de alunos atualizada abaixo
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
+                    {importResult.type === 'error' && !importResult.results ? (
                       <div>
                         <p className="font-medium">Erro na importação</p>
                         <p className="text-xs opacity-80 mt-0.5">{importResult.message}</p>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <Check className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="font-medium">
+                            {importResult.success} criado(s) · {importResult.failed} falho(s) · {importResult.total} total
+                          </p>
+                          {importResult.failed! > 0 && importResult.results && (
+                            <div className="mt-2 space-y-0.5">
+                              {importResult.results.filter(r => !r.success).map(r => (
+                                <p key={r.email} className="text-xs opacity-80 font-mono">
+                                  {r.email} — {r.error}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -324,7 +372,7 @@ const AdminStudents: React.FC = () => {
                 <div className="flex gap-3">
                   <button
                     onClick={handleBulkImport}
-                    disabled={importing || !importProductId || !importEmails.trim()}
+                    disabled={importing || !importProductId || !importEmails.trim() || !importPassword.trim()}
                     className="flex items-center gap-2 rounded-xl bg-secondary px-6 py-2.5 font-medium text-secondary-foreground transition-all hover:opacity-90 disabled:opacity-50"
                   >
                     {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}

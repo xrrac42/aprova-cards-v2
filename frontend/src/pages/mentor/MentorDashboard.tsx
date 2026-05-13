@@ -31,7 +31,7 @@ const MentorDashboard: React.FC = () => {
   const [inviteGenerating, setInviteGenerating] = useState<Record<string, boolean>>({});
   const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
 
-  const baseUrl = import.meta.env.PROD ? 'https://aprovacards.lovable.app' : window.location.origin;
+  const baseUrl = import.meta.env.PROD ? 'https://aprovarcards.com.br' : window.location.origin;
 
   const copyLoginLink = async () => {
     if (!mentor?.slug) return;

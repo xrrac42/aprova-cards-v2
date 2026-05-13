@@ -161,6 +161,7 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 
 	api.POST("/invite/validate", studentSignUpHandler.ValidateInviteCode)
 	api.POST("/auth/signup/initiate", studentSignUpHandler.InitiateStudentSignUp)
+	api.POST("/admin/students/bulk-signup", studentSignUpHandler.BulkSignUp)
 
 	// ---- Kiwify webhook (public, no JWT) ----
 	kiwifyWebhookHandler := handlers.NewKiwifyWebhookHandler(studentSignUpUC)

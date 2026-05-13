@@ -88,3 +88,26 @@ type ValidateInviteCodeResponse struct {
 	ExpiresAt    string `json:"expires_at,omitempty"`
 	Message      string `json:"message,omitempty"`
 }
+
+// BulkSignUpRequest is used by admin to register students in bulk without payment
+type BulkSignUpRequest struct {
+	MentorID        string   `json:"mentor_id" binding:"required"`
+	ProductID       string   `json:"product_id" binding:"required"`
+	DefaultPassword string   `json:"default_password" binding:"required,min=6"`
+	Emails          []string `json:"emails" binding:"required,min=1,max=500"`
+}
+
+// BulkSignUpResult holds the per-email result
+type BulkSignUpResult struct {
+	Email   string `json:"email"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// BulkSignUpResponse summarises the bulk operation
+type BulkSignUpResponse struct {
+	Total   int                `json:"total"`
+	Success int                `json:"success"`
+	Failed  int                `json:"failed"`
+	Results []BulkSignUpResult `json:"results"`
+}

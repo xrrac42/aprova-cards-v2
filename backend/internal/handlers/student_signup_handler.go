@@ -112,6 +112,24 @@ func (h *StudentSignUpHandler) InitiateStudentSignUp(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result, Message: "Sign up initiated"})
 }
 
+// BulkSignUp creates multiple student accounts without payment, for admin use
+// POST /admin/students/bulk-signup
+func (h *StudentSignUpHandler) BulkSignUp(c *gin.Context) {
+	var req dto.BulkSignUpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	result, err := h.usecase.BulkSignUp(&req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result})
+}
+
 // GetStudentAuth retrieves student auth information
 // GET /auth/student/:email
 func (h *StudentSignUpHandler) GetStudentAuth(c *gin.Context) {

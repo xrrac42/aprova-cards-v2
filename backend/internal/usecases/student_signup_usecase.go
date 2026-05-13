@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
@@ -31,6 +32,9 @@ type StudentSignUpUseCase interface {
 
 	// Student signup operations
 	InitiateStudentSignUp(req *dto.StudentSignUpRequest) (*dto.StudentSignUpResponse, error)
+
+	// Admin bulk signup (no payment required)
+	BulkSignUp(req *dto.BulkSignUpRequest) (*dto.BulkSignUpResponse, error)
 
 	// Auth operations
 	GetStudentAuth(email string) (*dto.StudentAuthResponse, error)
@@ -454,6 +458,111 @@ func (uc *studentSignUpUseCase) GetStudentAuth(email string) (*dto.StudentAuthRe
 		EmailVerified:  auth.EmailVerified,
 		CreatedAt:      auth.CreatedAt.Format(time.RFC3339),
 	}, nil
+}
+
+func (uc *studentSignUpUseCase) BulkSignUp(req *dto.BulkSignUpRequest) (*dto.BulkSignUpResponse, error) {
+	resp := &dto.BulkSignUpResponse{
+		Total:   len(req.Emails),
+		Results: make([]dto.BulkSignUpResult, 0, len(req.Emails)),
+	}
+
+	for _, rawEmail := range req.Emails {
+		email := strings.ToLower(strings.TrimSpace(rawEmail))
+		if email == "" {
+			continue
+		}
+
+		result := dto.BulkSignUpResult{Email: email}
+
+		// Skip if already registered
+		existing, _ := uc.invitationRepo.GetStudentAuthByEmail(email)
+		if existing != nil {
+			result.Success = false
+			result.Error = "já cadastrado"
+			resp.Failed++
+			resp.Results = append(resp.Results, result)
+			continue
+		}
+
+		supabaseUserID := uuid.New().String()
+		if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+			userMetadata := map[string]interface{}{
+				"role":          "aluno",
+				"mentor_id":     req.MentorID,
+				"product_id":    req.ProductID,
+				"signup_method": "admin_bulk",
+			}
+			authUser, authErr := uc.supabaseAdmin.CreateAuthUserWithMetadata(email, req.DefaultPassword, userMetadata)
+			if authErr != nil {
+				result.Success = false
+				result.Error = "erro ao criar usuário no Supabase"
+				resp.Failed++
+				resp.Results = append(resp.Results, result)
+				continue
+			}
+			supabaseUserID = authUser.ID
+		}
+
+		studentAuth := &models.StudentAuth{
+			StudentEmail:   email,
+			SupabaseUserID: supabaseUserID,
+			MentorID:       req.MentorID,
+			ProductID:      req.ProductID,
+		}
+		if err := uc.invitationRepo.CreateStudentAuth(studentAuth); err != nil {
+			if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+				_ = uc.supabaseAdmin.DeleteAuthUser(supabaseUserID)
+			}
+			result.Success = false
+			result.Error = "erro ao salvar auth"
+			resp.Failed++
+			resp.Results = append(resp.Results, result)
+			continue
+		}
+
+		mentorID := req.MentorID
+		productID := req.ProductID
+
+		// Upsert user_roles
+		role := &models.UserRole{
+			ID:        supabaseUserID,
+			Email:     email,
+			Role:      "aluno",
+			MentorID:  &mentorID,
+			ProductID: &productID,
+			Active:    true,
+		}
+		if err := uc.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "email"}},
+			DoUpdates: clause.AssignmentColumns([]string{"mentor_id", "product_id", "role", "active", "updated_at"}),
+		}).Create(role).Error; err != nil {
+			log.Printf("[bulk-signup] user_roles upsert failed for %s (non-fatal): %v", email, err)
+		}
+
+		// Upsert student_access
+		existingAccess, _ := uc.studentAccessRepo.GetByEmailAndProduct(email, productID)
+		if existingAccess == nil {
+			access := &models.StudentAccess{
+				Email:     email,
+				MentorID:  &mentorID,
+				ProductID: productID,
+				Active:    true,
+				StudentID: &supabaseUserID,
+			}
+			if err := uc.studentAccessRepo.Create(access); err != nil {
+				log.Printf("[bulk-signup] student_access create failed for %s (non-fatal): %v", email, err)
+			}
+		} else if !existingAccess.Active {
+			existingAccess.Active = true
+			_ = uc.studentAccessRepo.Update(existingAccess)
+		}
+
+		result.Success = true
+		resp.Success++
+		resp.Results = append(resp.Results, result)
+	}
+
+	return resp, nil
 }
 
 func (uc *studentSignUpUseCase) CreateSupabaseUser(email, password, fullName, invitationID string) (string, error) {

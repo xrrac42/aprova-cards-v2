@@ -249,9 +249,7 @@ const ProductManager: React.FC = () => {
       return;
     }
 
-    const backendURL =
-      import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
-
+const backendURL = "https://177.7.37.215:8080";
     if (editingDiscipline) {
       const resp = await fetch(
         `${backendURL}/api/v1/admin/disciplines/${editingDiscipline.id}`,

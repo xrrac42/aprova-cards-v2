@@ -124,8 +124,7 @@ const ProductManager: React.FC = () => {
       );
       if (resp.status === 404) {
         resp = await fetch(
-        `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
-
+          `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
         );
       }
       if (!resp.ok) {
@@ -250,7 +249,8 @@ const ProductManager: React.FC = () => {
       return;
     }
 
-const backendURL = "https://177.7.37.215:8080";
+    const backendURL =
+      import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
     if (editingDiscipline) {
       const resp = await fetch(
         `${backendURL}/api/v1/admin/disciplines/${editingDiscipline.id}`,

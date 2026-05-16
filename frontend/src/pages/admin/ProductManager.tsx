@@ -118,13 +118,13 @@ const ProductManager: React.FC = () => {
       if (prodErr) throw prodErr;
       setProduct(prod);
 
-      // Fetch disciplines from backend (fallback to protected route for older server builds)
+      // Fetch disciplines from backend
       let resp = await fetch(
-        `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
+        `${backendURL}/api/v1/admin/products/${productId}/disciplines`,
       );
       if (resp.status === 404) {
         resp = await fetch(
-          `https://api.aprovacards.com.br/api/v1/admin/products/${productId}/disciplines`,
+          `${backendURL}/api/v1/admin/products/${productId}/disciplines`,
         );
       }
       if (!resp.ok) {

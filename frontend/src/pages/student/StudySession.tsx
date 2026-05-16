@@ -217,7 +217,9 @@ const StudySession: React.FC = () => {
   const session = sessionRef.current;
 
   // Derive session key to detect new vs restored session
-  const sessionKey = `${session?.email ?? 'anon'}_${session?.product_id ?? 'no-product'}_${disciplineId}_${studyMode}_${newLimit}`;
+  // 't' param is set by SessionConfig on every "Iniciar" click, ensuring a fresh shuffle each time
+  const sessionTimestamp = searchParams.get('t') ?? '';
+  const sessionKey = `${session?.email ?? 'anon'}_${session?.product_id ?? 'no-product'}_${disciplineId}_${studyMode}_${newLimit}_${sessionTimestamp}`;
 
   // Local state — synced from module-level on mount
   const [cards, setCardsLocal] = useState<StudyCard[]>([]);

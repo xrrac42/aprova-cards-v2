@@ -133,6 +133,7 @@ const SessionConfig: React.FC = () => {
     if (mode === 'new' || mode === 'mixed') {
       params.set('newLimit', String(getNewCardCount()));
     }
+    params.set('t', String(Date.now()));
     navigate(`/aluno/estudo/${disciplineId}?${params.toString()}`);
   };
 

@@ -7,7 +7,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1
-	github.com/stripe/stripe-go/v79 v79.12.0
 	github.com/supabase-community/supabase-go v0.0.4
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.0

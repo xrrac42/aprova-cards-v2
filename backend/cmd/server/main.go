@@ -80,8 +80,8 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	healthHandler := handlers.NewHealthHandler(db)
 	api.GET("/health", healthHandler.Check)
 
-	// ---- Auth (public, stricter rate limit: 5 req / 5 min) ----
-	authLimiter := middleware.NewRateLimiter(5, 300)
+	// ---- Auth (public, stricter rate limit: 60 req / 5 min per IP) ----
+	authLimiter := middleware.NewRateLimiter(60, 300)
 	mentorRepo := repositories.NewMentorRepository(db)
 	studentAccessRepoForAuth := repositories.NewStudentAccessRepository(db)
 	authUC := usecases.NewAuthUseCase(mentorRepo, studentAccessRepoForAuth, supabaseAdminClient, db, cfg.Admin.Email, cfg.Admin.Password)

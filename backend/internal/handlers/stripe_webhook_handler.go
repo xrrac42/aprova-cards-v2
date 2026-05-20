@@ -32,8 +32,9 @@ func (h *KiwifyWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	if payload.Buyer.Email == "" {
-		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Missing buyer email"})
+	if payload.Customer.Email == "" {
+		log.Printf("[kiwify-webhook] missing customer email, order_id=%s order_status=%s", payload.OrderID, payload.OrderStatus)
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Missing customer email"})
 		return
 	}
 
@@ -43,7 +44,7 @@ func (h *KiwifyWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 	}
 
 	req := &dto.ActivateFromKiwifyRequest{
-		StudentEmail:  payload.Buyer.Email,
+		StudentEmail:  payload.Customer.Email,
 		KiwifyOrderID: payload.OrderID,
 		AmountCents:   payload.Payment.Amount,
 		Currency:      currency,

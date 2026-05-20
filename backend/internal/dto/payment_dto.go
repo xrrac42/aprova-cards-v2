@@ -48,10 +48,10 @@ type KiwifyWebhookPayload struct {
 	Type        string `json:"type"`
 	OrderID     string `json:"order_id"`
 	OrderStatus string `json:"order_status"`
-	Buyer       struct {
+	Customer    struct {
 		Email string `json:"email"`
 		Name  string `json:"name"`
-	} `json:"buyer"`
+	} `json:"customer"`
 	Product struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`

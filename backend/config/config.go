@@ -96,7 +96,7 @@ func Load() *Config {
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:       getEnvBool("RATE_LIMIT_ENABLED", true),
-			Requests:      getEnvInt("RATE_LIMIT_REQUESTS", 100),
+			Requests:      getEnvInt("RATE_LIMIT_REQUESTS", 10000),
 			WindowSeconds: getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 60),
 		},
 		Supabase: SupabaseConfig{

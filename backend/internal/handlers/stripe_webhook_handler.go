@@ -31,35 +31,34 @@ func (h *KiwifyWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 		return
 	}
 
-	order := payload.Order
-	log.Printf("[kiwify-webhook] event=%s order_id=%s status=%s email=%s", order.WebhookEventType, order.OrderID, order.OrderStatus, order.Customer.Email)
+	log.Printf("[kiwify-webhook] event=%s order_id=%s status=%s email=%s", payload.WebhookEventType, payload.OrderID, payload.OrderStatus, payload.Customer.Email)
 
 	// Only process approved orders
-	if order.WebhookEventType != "order_approved" && order.OrderStatus != "paid" {
+	if payload.WebhookEventType != "order_approved" && payload.OrderStatus != "paid" {
 		c.JSON(http.StatusOK, dto.APIResponse{Success: true, Message: "Event ignored"})
 		return
 	}
 
-	if order.Customer.Email == "" {
-		log.Printf("[kiwify-webhook] missing customer email, order_id=%s", order.OrderID)
+	if payload.Customer.Email == "" {
+		log.Printf("[kiwify-webhook] missing customer email, order_id=%s", payload.OrderID)
 		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Missing customer email"})
 		return
 	}
 
-	currency := order.Commissions.Currency
+	currency := payload.Commissions.Currency
 	if currency == "" {
 		currency = "BRL"
 	}
 
 	req := &dto.ActivateFromKiwifyRequest{
-		StudentEmail:  order.Customer.Email,
-		KiwifyOrderID: order.OrderID,
-		AmountCents:   order.Commissions.ChargeAmount,
+		StudentEmail:  payload.Customer.Email,
+		KiwifyOrderID: payload.OrderID,
+		AmountCents:   payload.Commissions.ChargeAmount,
 		Currency:      currency,
 	}
 
 	if err := h.studentSignUpUsecase.ActivateFromKiwify(req); err != nil {
-		log.Printf("[kiwify-webhook] activation failed for %s: %v", order.Customer.Email, err)
+		log.Printf("[kiwify-webhook] activation failed for %s: %v", payload.Customer.Email, err)
 		// Return 200 to avoid infinite retries from Kiwify
 		c.JSON(http.StatusOK, dto.APIResponse{
 			Success: false,

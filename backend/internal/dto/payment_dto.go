@@ -42,21 +42,17 @@ type PaymentListResponse struct {
 	TotalPages int               `json:"total_pages"`
 }
 
-// KiwifyWebhookPayload is the payload sent by Kiwify on order events
+// KiwifyWebhookPayload is the payload sent by Kiwify on order events.
+// The signature arrives as a query param; the body is the order object directly (no wrapper).
 type KiwifyWebhookPayload struct {
-	Signature string      `json:"signature"`
-	Order     KiwifyOrder `json:"order"`
-}
-
-type KiwifyOrder struct {
-	OrderID          string             `json:"order_id"`
-	OrderRef         string             `json:"order_ref"`
-	OrderStatus      string             `json:"order_status"`
-	WebhookEventType string             `json:"webhook_event_type"`
-	PaymentMethod    string             `json:"payment_method"`
-	Customer         KiwifyCustomer     `json:"Customer"`
-	Product          KiwifyProduct      `json:"Product"`
-	Commissions      KiwifyCommissions  `json:"Commissions"`
+	OrderID          string            `json:"order_id"`
+	OrderRef         string            `json:"order_ref"`
+	OrderStatus      string            `json:"order_status"`
+	WebhookEventType string            `json:"webhook_event_type"`
+	PaymentMethod    string            `json:"payment_method"`
+	Customer         KiwifyCustomer    `json:"Customer"`
+	Product          KiwifyProduct     `json:"Product"`
+	Commissions      KiwifyCommissions `json:"Commissions"`
 }
 
 type KiwifyCustomer struct {

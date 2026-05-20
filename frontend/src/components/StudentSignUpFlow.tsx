@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, Eye, EyeOff, ExternalLink } from 'lucide-react';
+import { Loader2, AlertCircle, Eye, EyeOff, ExternalLink, GraduationCap } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Step = 'validating' | 'form' | 'redirecting' | 'invalid';
@@ -39,6 +39,14 @@ interface Invitation {
 }
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+
+const PageShell = ({ children }: { children: React.ReactNode }) => (
+  <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+    <div className="pointer-events-none absolute top-0 left-1/2 h-80 w-[520px] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
+    <div className="pointer-events-none absolute bottom-0 right-0 h-64 w-96 rounded-full bg-secondary/8 blur-[100px]" />
+    <div className="relative w-full max-w-md">{children}</div>
+  </div>
+);
 
 export const StudentSignUpFlow: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -119,62 +127,73 @@ export const StudentSignUpFlow: React.FC = () => {
 
   if (step === 'validating') {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-12 pb-12 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+      <PageShell>
+        <Card className="border-border/50 shadow-[0_8px_32px_-8px_hsla(0,0%,0%,0.6)]">
+          <CardContent className="pb-12 pt-12 text-center">
+            <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-primary" />
             <p className="text-muted-foreground">Validando convite…</p>
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
   if (step === 'invalid') {
     return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-12 pb-12 text-center space-y-4">
-            <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+      <PageShell>
+        <Card className="border-border/50 shadow-[0_8px_32px_-8px_hsla(0,0%,0%,0.6)]">
+          <CardContent className="pb-12 pt-12 text-center space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 border border-destructive/20">
+              <AlertCircle className="h-7 w-7 text-destructive" />
+            </div>
             <h2 className="text-2xl font-bold">Convite inválido</h2>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               Este link de convite é inválido ou expirou. Solicite um novo convite ao seu instrutor.
             </p>
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
   if (step === 'redirecting') {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-12 pb-12 text-center space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+      <PageShell>
+        <Card className="border-border/50 shadow-[0_8px_32px_-8px_hsla(0,0%,0%,0.6)]">
+          <CardContent className="pb-12 pt-12 text-center space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20">
+              <Loader2 className="h-7 w-7 animate-spin text-primary" />
+            </div>
             <h2 className="text-xl font-semibold">Redirecionando para o pagamento…</h2>
             <p className="text-muted-foreground text-sm">
               Você será levado ao ambiente seguro da Kiwify.
             </p>
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-background dark:to-background py-8 px-4">
-      <div className="max-w-md mx-auto space-y-6">
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold">{invitation?.product_name}</h1>
+    <div className="relative min-h-screen overflow-hidden bg-background py-10 px-4">
+      <div className="pointer-events-none absolute top-0 left-1/2 h-80 w-[520px] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
+      <div className="pointer-events-none absolute bottom-0 right-0 h-64 w-96 rounded-full bg-secondary/8 blur-[100px]" />
+
+      <div className="relative max-w-md mx-auto space-y-6">
+        <div className="text-center space-y-3 pt-2">
+          <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary">
+            <GraduationCap className="h-3.5 w-3.5" />
+            Convite exclusivo
+          </div>
+          <h1 className="text-2xl font-bold font-display">{invitation?.product_name}</h1>
           <p className="text-muted-foreground text-sm">
             Crie sua conta e conclua o pagamento para ter acesso imediato.
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Criar conta</CardTitle>
+        <Card className="border-border/50 shadow-[0_8px_32px_-8px_hsla(0,0%,0%,0.6)]">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Criar conta</CardTitle>
             <CardDescription>Preencha seus dados para começar</CardDescription>
           </CardHeader>
           <CardContent>
@@ -224,7 +243,7 @@ export const StudentSignUpFlow: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                           >
                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </button>
@@ -253,7 +272,7 @@ export const StudentSignUpFlow: React.FC = () => {
                   )}
                 />
 
-                <Alert>
+                <Alert className="border-border/50 bg-muted/50">
                   <ExternalLink className="h-4 w-4" />
                   <AlertDescription className="text-xs">
                     Após criar a conta, você será redirecionado à Kiwify para concluir o pagamento com segurança.
@@ -274,7 +293,7 @@ export const StudentSignUpFlow: React.FC = () => {
 
         <p className="text-center text-xs text-muted-foreground">
           Já tem conta?{' '}
-          <a href="/login" className="underline hover:text-foreground">Faça login</a>
+          <a href="/login" className="underline hover:text-foreground transition-colors">Faça login</a>
         </p>
       </div>
     </div>

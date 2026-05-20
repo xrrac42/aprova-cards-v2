@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 
@@ -19,8 +21,11 @@ func NewKiwifyWebhookHandler(studentSignUpUC usecases.StudentSignUpUseCase) *Kiw
 
 // POST /webhooks/kiwify
 func (h *KiwifyWebhookHandler) HandleWebhookEvent(c *gin.Context) {
+	rawBody, _ := io.ReadAll(c.Request.Body)
+	log.Printf("[kiwify-webhook] raw body: %s", string(rawBody))
+
 	var payload dto.KiwifyWebhookPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
 		log.Printf("[kiwify-webhook] failed to parse payload: %v", err)
 		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: "Invalid payload"})
 		return

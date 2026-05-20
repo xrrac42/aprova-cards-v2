@@ -51,7 +51,7 @@ func (h *KiwifyWebhookHandler) HandleWebhookEvent(c *gin.Context) {
 	}
 
 	if err := h.studentSignUpUsecase.ActivateFromKiwify(req); err != nil {
-		log.Printf("[kiwify-webhook] activation failed for %s: %v", payload.Buyer.Email, err)
+		log.Printf("[kiwify-webhook] activation failed for %s: %v", payload.Customer.Email, err)
 		// Return 200 to avoid infinite retries from Kiwify
 		c.JSON(http.StatusOK, dto.APIResponse{
 			Success: false,

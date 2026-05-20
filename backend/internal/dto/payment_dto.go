@@ -44,23 +44,34 @@ type PaymentListResponse struct {
 
 // KiwifyWebhookPayload is the payload sent by Kiwify on order events
 type KiwifyWebhookPayload struct {
-	Token       string `json:"token"`
-	Type        string `json:"type"`
-	OrderID     string `json:"order_id"`
-	OrderStatus string `json:"order_status"`
-	Customer    struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
-	} `json:"customer"`
-	Product struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"product"`
-	Payment struct {
-		Amount   int    `json:"amount"`
-		Currency string `json:"currency"`
-		Method   string `json:"method"`
-	} `json:"payment"`
+	Signature string      `json:"signature"`
+	Order     KiwifyOrder `json:"order"`
+}
+
+type KiwifyOrder struct {
+	OrderID          string             `json:"order_id"`
+	OrderRef         string             `json:"order_ref"`
+	OrderStatus      string             `json:"order_status"`
+	WebhookEventType string             `json:"webhook_event_type"`
+	PaymentMethod    string             `json:"payment_method"`
+	Customer         KiwifyCustomer     `json:"Customer"`
+	Product          KiwifyProduct      `json:"Product"`
+	Commissions      KiwifyCommissions  `json:"Commissions"`
+}
+
+type KiwifyCustomer struct {
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+}
+
+type KiwifyProduct struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+}
+
+type KiwifyCommissions struct {
+	ChargeAmount int    `json:"charge_amount"`
+	Currency     string `json:"currency"`
 }
 
 // ActivateFromKiwifyRequest carries the data extracted from a Kiwify webhook

@@ -3,11 +3,15 @@
  * Injeta token em todas as requisições e faz refresh automático se expirado
  */
 
-import { validateToken, refreshToken as refreshTokenFn } from '@/lib/auth';
+import {
+  validateToken,
+  refreshToken as refreshTokenFn,
+  clearSession,
+} from "@/lib/auth";
 
 interface RequestConfig {
   url: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: any;
   headers?: Record<string, string>;
 }
@@ -35,8 +39,8 @@ class AuthenticatedHttpClient {
    * Carrega tokens do localStorage
    */
   private loadTokens() {
-    this.accessToken = localStorage.getItem('supabase_access_token');
-    this.refreshToken = localStorage.getItem('supabase_refresh_token');
+    this.accessToken = localStorage.getItem("supabase_access_token");
+    this.refreshToken = localStorage.getItem("supabase_refresh_token");
   }
 
   /**
@@ -45,8 +49,8 @@ class AuthenticatedHttpClient {
   private saveTokens(accessToken: string, refreshToken: string) {
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
-    localStorage.setItem('supabase_access_token', accessToken);
-    localStorage.setItem('supabase_refresh_token', refreshToken);
+    localStorage.setItem("supabase_access_token", accessToken);
+    localStorage.setItem("supabase_refresh_token", refreshToken);
   }
 
   /**
@@ -55,8 +59,8 @@ class AuthenticatedHttpClient {
   clearTokens() {
     this.accessToken = null;
     this.refreshToken = null;
-    localStorage.removeItem('supabase_access_token');
-    localStorage.removeItem('supabase_refresh_token');
+    localStorage.removeItem("supabase_access_token");
+    localStorage.removeItem("supabase_refresh_token");
   }
 
   /**
@@ -69,7 +73,7 @@ class AuthenticatedHttpClient {
     }
 
     if (!this.refreshToken) {
-      this.redirectToLogin('Sessão expirada');
+      this.redirectToLogin("Sessão expirada");
       return null;
     }
 
@@ -80,7 +84,7 @@ class AuthenticatedHttpClient {
         this.saveTokens(result.accessToken, result.refreshToken);
         return result.accessToken;
       } catch (error) {
-        this.redirectToLogin('Não foi possível renovar a sessão');
+        this.redirectToLogin("Não foi possível renovar a sessão");
         return null;
       } finally {
         this.isRefreshing = false;
@@ -96,7 +100,7 @@ class AuthenticatedHttpClient {
    */
   private async ensureValidToken(): Promise<string | null> {
     if (!this.accessToken) {
-      this.redirectToLogin('Não há sessão ativa');
+      this.redirectToLogin("Não há sessão ativa");
       return null;
     }
 
@@ -117,14 +121,36 @@ class AuthenticatedHttpClient {
   private redirectToLogin(reason: string) {
     console.warn(`Redirecionando para login: ${reason}`);
     this.clearTokens();
-    window.location.href = '/login';
+
+    const raw = localStorage.getItem("flashcard_session");
+    let loginUrl = "/login";
+    if (raw) {
+      try {
+        const session = JSON.parse(raw);
+        if (session?.mentor_slug) {
+          loginUrl = `/login/${session.mentor_slug}`;
+        }
+      } catch {}
+    }
+
+    clearSession();
+
+    window.dispatchEvent(
+      new CustomEvent("session-expired", {
+        detail: { loginUrl, reason },
+      }),
+    );
+
+    setTimeout(() => {
+      window.location.href = loginUrl;
+    }, 3000);
   }
 
   /**
    * Faz requisição HTTP com token automático
    */
   async request<T = any>(config: RequestConfig): Promise<HttpResponse<T>> {
-    const { url, method = 'GET', body, headers = {} } = config;
+    const { url, method = "GET", body, headers = {} } = config;
 
     // Garantir token válido
     const token = await this.ensureValidToken();
@@ -132,14 +158,14 @@ class AuthenticatedHttpClient {
       return {
         status: 401,
         data: null as any,
-        error: 'Não autorizado',
+        error: "Não autorizado",
       };
     }
 
     // Preparar headers com token
     const finalHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
       ...headers,
     };
 
@@ -177,30 +203,48 @@ class AuthenticatedHttpClient {
       return {
         status: 0,
         data: null as any,
-        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       };
     }
   }
 
   // Métodos convenientes
-  async get<T = any>(url: string, headers?: Record<string, string>): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'GET', headers });
+  async get<T = any>(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<HttpResponse<T>> {
+    return this.request<T>({ url, method: "GET", headers });
   }
 
-  async post<T = any>(url: string, body?: any, headers?: Record<string, string>): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'POST', body, headers });
+  async post<T = any>(
+    url: string,
+    body?: any,
+    headers?: Record<string, string>,
+  ): Promise<HttpResponse<T>> {
+    return this.request<T>({ url, method: "POST", body, headers });
   }
 
-  async put<T = any>(url: string, body?: any, headers?: Record<string, string>): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'PUT', body, headers });
+  async put<T = any>(
+    url: string,
+    body?: any,
+    headers?: Record<string, string>,
+  ): Promise<HttpResponse<T>> {
+    return this.request<T>({ url, method: "PUT", body, headers });
   }
 
-  async patch<T = any>(url: string, body?: any, headers?: Record<string, string>): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'PATCH', body, headers });
+  async patch<T = any>(
+    url: string,
+    body?: any,
+    headers?: Record<string, string>,
+  ): Promise<HttpResponse<T>> {
+    return this.request<T>({ url, method: "PATCH", body, headers });
   }
 
-  async delete<T = any>(url: string, headers?: Record<string, string>): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'DELETE', headers });
+  async delete<T = any>(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<HttpResponse<T>> {
+    return this.request<T>({ url, method: "DELETE", headers });
   }
 }
 
@@ -211,10 +255,12 @@ export const httpClient = new AuthenticatedHttpClient();
  * Exemplo de uso em um arquivo de API
  */
 export class SampleAPI {
-  private base = 'http://localhost:8000/api/v1';
+  private base = "http://localhost:8000/api/v1";
 
   async getSamples(page = 1, pageSize = 10) {
-    return httpClient.get(`${this.base}/samples?page=${page}&page_size=${pageSize}`);
+    return httpClient.get(
+      `${this.base}/samples?page=${page}&page_size=${pageSize}`,
+    );
   }
 
   async getSample(id: string) {
@@ -243,15 +289,15 @@ export async function exampleUsage() {
   // GET com autenticação automática
   const { status, data, error } = await api.getSamples();
   if (status === 200) {
-    console.log('Samples:', data);
+    console.log("Samples:", data);
   } else {
-    console.error('Erro:', error);
+    console.error("Erro:", error);
   }
 
   // POST com autenticação automática
-  const createResult = await api.createSample('John Doe', 'john@example.com');
+  const createResult = await api.createSample("John Doe", "john@example.com");
   if (createResult.status === 200) {
-    console.log('Amostra criada:', createResult.data);
+    console.log("Amostra criada:", createResult.data);
   }
 
   // Se o token expirar durante a requisição, será renovado automaticamente

@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
 import { StudentSignUpFlow } from "./components/StudentSignUpFlow";
+import { SessionExpiredToast } from "./components/SessionExpiredToast";
 
 // Lazy load all non-login routes
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -52,6 +53,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <SessionExpiredToast />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Suspense fallback={<LazyFallback />}>
         <Routes>

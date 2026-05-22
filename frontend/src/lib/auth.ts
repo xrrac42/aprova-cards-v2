@@ -243,7 +243,7 @@ export async function login(
   if (sessionMentorId) {
     const { data } = await supabase
       .from("mentors")
-      .select("id, name, primary_color, secondary_color, logo_url")
+      .select("id, name, slug, primary_color, secondary_color, logo_url")
       .eq("id", sessionMentorId)
       .maybeSingle();
     mentorData = data;
@@ -257,6 +257,7 @@ export async function login(
     product_id: sessionProductId,
     mentor_id: mentorData?.id,
     mentor_name: mentorData?.name,
+    mentor_slug: mentorData?.slug,
     access_token: accessToken, // Store JWT for API requests
   };
 

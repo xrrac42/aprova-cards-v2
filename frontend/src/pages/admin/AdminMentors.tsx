@@ -10,6 +10,7 @@ import {
   Search,
   Loader2,
   Eye,
+  EyeOff,
   Copy,
   Check,
   AlertTriangle,
@@ -48,6 +49,12 @@ const AdminMentors: React.FC = () => {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [passwordCreatedModal, setPasswordCreatedModal] = useState<{
+    open: boolean;
+    password: string;
+  }>({ open: false, password: "" });
+  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{
     open: boolean;
     id: string;
@@ -214,6 +221,12 @@ const AdminMentors: React.FC = () => {
         if (!response.ok || !result?.success) {
           throw new Error(result?.error || "Falha ao provisionar mentor");
         }
+
+        const createdPassword = form.password;
+        setShowModal(false);
+        load();
+        setPasswordCreatedModal({ open: true, password: createdPassword });
+        return;
       }
 
       setShowModal(false);
@@ -476,14 +489,24 @@ const AdminMentors: React.FC = () => {
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
                   Senha de acesso (Auth)
                 </label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, password: e.target.value }))
-                  }
-                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground font-mono focus:border-primary focus:outline-none transition-colors"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, password: e.target.value }))
+                    }
+                    className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 pr-10 text-foreground font-mono focus:border-primary focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   A senha sera criada no Supabase Auth e nao armazenada em
                   plaintext.
@@ -590,6 +613,72 @@ const AdminMentors: React.FC = () => {
                 className="flex-1 rounded-xl border border-border py-3 font-medium text-foreground"
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Created Modal */}
+      {passwordCreatedModal.open && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="font-display text-base font-semibold text-foreground">
+                  Mentor criado com sucesso!
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Copie a senha agora — ela não poderá ser visualizada novamente.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Por razões de segurança, essa senha <strong className="text-foreground">não é armazenada em texto legível</strong> e não
+              ficará acessível novamente neste painel. Caso precise recuperá-la
+              futuramente, será necessário solicitar um reset via e-mail pelo
+              próprio mentor.
+            </p>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Senha de acesso gerada
+              </label>
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3">
+                <code className="flex-1 select-all font-mono text-sm text-foreground">
+                  {passwordCreatedModal.password}
+                </code>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(passwordCreatedModal.password);
+                    setCopiedPassword(true);
+                    setTimeout(() => setCopiedPassword(false), 2000);
+                  }}
+                  title="Copiar senha"
+                  className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
+                >
+                  {copiedPassword ? (
+                    <Check className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={() => setPasswordCreatedModal({ open: false, password: "" })}
+                className="rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                Entendi, já copiei a senha
               </button>
             </div>
           </div>

@@ -56,8 +56,7 @@ const MentorDashboard: React.FC = () => {
     
     try {
       const code = crypto.randomUUID().replace(/-/g, '');
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30);
+      const expiresAt = new Date('2099-12-31T23:59:59Z');
 
       const { error: dbError } = await supabase.from('student_invitations').insert({
         mentor_id: session!.mentor_id,

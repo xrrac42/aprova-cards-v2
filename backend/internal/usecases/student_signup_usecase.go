@@ -95,11 +95,7 @@ func (uc *studentSignUpUseCase) GenerateInvitation(req *dto.GenerateInvitationRe
 		return nil, errors.NewInternalServerError("Failed to generate invite code")
 	}
 
-	expirationDays := req.ExpirationDays
-	if expirationDays == 0 {
-		expirationDays = 30
-	}
-	expiresAt := time.Now().AddDate(0, 0, expirationDays)
+	expiresAt := time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
 
 	invitation := &models.StudentInvitation{
 		ID:         uuid.New().String(),
@@ -171,20 +167,6 @@ func (uc *studentSignUpUseCase) ValidateInviteCode(code string) (*dto.ValidateIn
 		return &dto.ValidateInviteCodeResponse{
 			IsValid: false,
 			Message: "Invalid invite code",
-		}, nil
-	}
-
-	if time.Now().After(invitation.ExpiresAt) {
-		return &dto.ValidateInviteCodeResponse{
-			IsValid: false,
-			Message: "Invitation has expired",
-		}, nil
-	}
-
-	if invitation.Status == "active" {
-		return &dto.ValidateInviteCodeResponse{
-			IsValid: false,
-			Message: "Invitation has already been used",
 		}, nil
 	}
 

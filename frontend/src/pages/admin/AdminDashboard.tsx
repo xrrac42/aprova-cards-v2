@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getSession, clearSession } from '@/lib/auth';
 import {
   LayoutDashboard, Users, Package, BookOpen, CreditCard, Upload,
-  GraduationCap, BarChart3, Palette, LogOut, ChevronRight, Plus, Menu, X, Activity, ShieldCheck, MessageSquare
+  GraduationCap, BarChart3, Palette, LogOut, ChevronRight, Plus, Menu, X, Activity, ShieldCheck, MessageSquare, FileDown
 } from 'lucide-react';
 
 const navItems = [
@@ -18,6 +18,7 @@ const navItems = [
   { to: '/admin/saude', label: 'Saúde', icon: Activity },
   { to: '/admin/qualidade', label: 'Qualidade', icon: ShieldCheck },
   { to: '/admin/personalizacao', label: 'Personalização', icon: Palette },
+  { to: '/admin/importar-deck', label: 'Importar Deck', icon: FileDown },
 ];
 
 export const AdminLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {

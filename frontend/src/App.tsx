@@ -23,6 +23,7 @@ const Customization = lazy(() => import("./pages/admin/Customization"));
 const SystemHealth = lazy(() => import("./pages/admin/SystemHealth"));
 const CardQuality = lazy(() => import("./pages/admin/CardQuality"));
 const AdminFeedbacks = lazy(() => import("./pages/admin/AdminFeedbacks"));
+const AdminImportDeck = lazy(() => import("./pages/admin/AdminImportDeck"));
 
 const MentorDashboard = lazy(() => import("./pages/mentor/MentorDashboard"));
 const MentorStudents = lazy(() => import("./pages/mentor/MentorStudents"));
@@ -75,6 +76,7 @@ const App = () => (
           <Route path="/admin/qualidade" element={<CardQuality />} />
           <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
           <Route path="/admin/personalizacao" element={<Customization />} />
+          <Route path="/admin/importar-deck" element={<AdminImportDeck />} />
           <Route path="/checkout" element={<CheckoutRoute />} />
           <Route path="/convite" element={<StudentSignUpFlow />} />
           <Route path="/payment/success" element={<PaymentSuccess />} />

@@ -89,6 +89,29 @@ type ValidateInviteCodeResponse struct {
 	Message      string `json:"message,omitempty"`
 }
 
+// ValidateProductLinkRequest checks if a persistent product token is valid
+type ValidateProductLinkRequest struct {
+	ProductToken string `json:"product_token" binding:"required"`
+}
+
+// ValidateProductLinkResponse returns product details for a persistent link
+type ValidateProductLinkResponse struct {
+	IsValid     bool   `json:"is_valid"`
+	ProductID   string `json:"product_id,omitempty"`
+	MentorID    string `json:"mentor_id,omitempty"`
+	ProductName string `json:"product_name,omitempty"`
+	PaymentLink string `json:"payment_link,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+// StudentSignUpByProductLinkRequest initiates signup via a persistent product link
+type StudentSignUpByProductLinkRequest struct {
+	ProductToken string `json:"product_token" binding:"required"`
+	Email        string `json:"email" binding:"required,email"`
+	Password     string `json:"password" binding:"required,min=8"`
+	FullName     string `json:"full_name" binding:"required,min=3"`
+}
+
 // BulkSignUpRequest is used by admin to register students in bulk without payment
 type BulkSignUpRequest struct {
 	MentorID        string   `json:"mentor_id" binding:"required"`

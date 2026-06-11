@@ -27,6 +27,10 @@ type StudentSignUpUseCase interface {
 	ListMentorInvitations(mentorID string, page, pageSize int) (*dto.InvitationListResponse, error)
 	ValidateInviteCode(code string) (*dto.ValidateInviteCodeResponse, error)
 
+	// Persistent product link (stateless, for landing pages / marketing campaigns)
+	ValidateProductToken(token string) (*dto.ValidateProductLinkResponse, error)
+	InitiateStudentSignUpByProductLink(req *dto.StudentSignUpByProductLinkRequest) (*dto.StudentSignUpResponse, error)
+
 	// Kiwify payment flow
 	ActivateFromKiwify(req *dto.ActivateFromKiwifyRequest) error
 
@@ -197,6 +201,108 @@ func (uc *studentSignUpUseCase) ValidateInviteCode(code string) (*dto.ValidateIn
 		Status:       invitation.Status,
 		ExpiresAt:    invitation.ExpiresAt.Format(time.RFC3339),
 		Message:      "Invitation is valid",
+	}, nil
+}
+
+func (uc *studentSignUpUseCase) ValidateProductToken(token string) (*dto.ValidateProductLinkResponse, error) {
+	product, err := uc.productRepo.GetByPersistentToken(token)
+	if err != nil {
+		return nil, errors.NewInternalServerError("Failed to validate product token")
+	}
+	if product == nil || !product.Active {
+		return &dto.ValidateProductLinkResponse{IsValid: false, Message: "Invalid or inactive product link"}, nil
+	}
+	paymentLink := ""
+	if product.PaymentLink != nil {
+		paymentLink = *product.PaymentLink
+	}
+	return &dto.ValidateProductLinkResponse{
+		IsValid:     true,
+		ProductID:   product.ID,
+		MentorID:    product.MentorID,
+		ProductName: product.Name,
+		PaymentLink: paymentLink,
+		Message:     "Product link is valid",
+	}, nil
+}
+
+func (uc *studentSignUpUseCase) InitiateStudentSignUpByProductLink(req *dto.StudentSignUpByProductLinkRequest) (*dto.StudentSignUpResponse, error) {
+	product, err := uc.productRepo.GetByPersistentToken(req.ProductToken)
+	if err != nil {
+		return nil, errors.NewInternalServerError("Failed to fetch product")
+	}
+	if product == nil || !product.Active {
+		return nil, errors.NewBadRequest("Invalid or inactive product link")
+	}
+
+	existingAuth, err := uc.invitationRepo.GetStudentAuthByEmail(req.Email)
+	if err != nil {
+		return nil, errors.NewInternalServerError("Failed to check email")
+	}
+	if existingAuth != nil {
+		return nil, errors.NewBadRequest("E-mail inválido ou já cadastrado")
+	}
+
+	// Create a fresh invitation on-the-fly for this signup
+	inviteCode, err := generateUniqueInviteCode()
+	if err != nil {
+		return nil, errors.NewInternalServerError("Failed to generate invite code")
+	}
+	invitation := &models.StudentInvitation{
+		ID:         uuid.New().String(),
+		MentorID:   product.MentorID,
+		ProductID:  product.ID,
+		InviteCode: inviteCode,
+		Status:     "pending",
+		ExpiresAt:  time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC),
+	}
+	email := req.Email
+	invitation.InvitedEmail = &email
+	if err := uc.invitationRepo.Create(invitation); err != nil {
+		return nil, errors.NewInternalServerError("Failed to create invitation")
+	}
+
+	supabaseUserID := uuid.New().String()
+	if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+		userMetadata := map[string]interface{}{
+			"role":          "aluno",
+			"mentor_id":     product.MentorID,
+			"product_id":    product.ID,
+			"invitation_id": invitation.ID,
+			"signup_method": "persistent_product_link",
+		}
+		authUser, authErr := uc.supabaseAdmin.CreateAuthUserWithMetadata(req.Email, req.Password, userMetadata)
+		if authErr != nil {
+			return nil, errors.NewBadRequest("E-mail inválido ou já cadastrado")
+		}
+		supabaseUserID = authUser.ID
+	}
+
+	studentAuth := &models.StudentAuth{
+		StudentEmail:   req.Email,
+		SupabaseUserID: supabaseUserID,
+		InvitationID:   &invitation.ID,
+		MentorID:       product.MentorID,
+		ProductID:      product.ID,
+	}
+	if err := uc.invitationRepo.CreateStudentAuth(studentAuth); err != nil {
+		if uc.supabaseAdmin != nil && uc.supabaseAdmin.IsConfigured() {
+			_ = uc.supabaseAdmin.DeleteAuthUser(supabaseUserID)
+		}
+		return nil, errors.NewInternalServerError("Failed to create student auth")
+	}
+
+	now := time.Now()
+	invitation.StudentEmail = &req.Email
+	invitation.Status = "signed_up"
+	invitation.SignedUpAt = &now
+	_ = uc.invitationRepo.Update(invitation)
+
+	return &dto.StudentSignUpResponse{
+		InvitationID: invitation.ID,
+		Email:        req.Email,
+		Message:      "Sign up initiated successfully",
+		NextStep:     "payment",
 	}, nil
 }
 

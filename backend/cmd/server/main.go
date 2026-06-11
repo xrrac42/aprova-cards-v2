@@ -162,6 +162,10 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.POST("/invite/validate", studentSignUpHandler.ValidateInviteCode)
 	api.POST("/auth/signup/initiate", studentSignUpHandler.InitiateStudentSignUp)
 	api.POST("/admin/students/bulk-signup", studentSignUpHandler.BulkSignUp)
+	// Persistent product link — stateless read for landing pages
+	api.POST("/product-link/validate", studentSignUpHandler.ValidateProductToken)
+	// Signup via persistent product link — creates invitation on-the-fly
+	api.POST("/auth/signup/initiate-product-link", studentSignUpHandler.InitiateStudentSignUpByProductLink)
 
 	// ---- Kiwify webhook (public, no JWT) ----
 	kiwifyWebhookHandler := handlers.NewKiwifyWebhookHandler(studentSignUpUC)

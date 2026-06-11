@@ -12,10 +12,11 @@ type Product struct {
 	MentorID      string    `gorm:"not null;type:uuid" json:"mentor_id"`
 	Name          string    `gorm:"not null" json:"name"`
 	AccessCode    string    `gorm:"uniqueIndex;not null" json:"access_code"`
-	Active        bool      `gorm:"not null;default:true" json:"active"`
-	CoverImageURL *string   `json:"cover_image_url"`
-	PaymentLink   *string   `gorm:"type:text" json:"payment_link"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
+	Active          bool      `gorm:"not null;default:true" json:"active"`
+	CoverImageURL   *string   `json:"cover_image_url"`
+	PaymentLink     *string   `gorm:"type:text" json:"payment_link"`
+	PersistentToken *string   `gorm:"type:text;uniqueIndex" json:"persistent_token"`
+	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 	Mentor        *Mentor   `gorm:"foreignKey:MentorID" json:"mentor,omitempty"`
 }
 

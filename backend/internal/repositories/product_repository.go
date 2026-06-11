@@ -10,6 +10,7 @@ import (
 type ProductRepository interface {
 	Create(entity *models.Product) error
 	GetByID(id string) (*models.Product, error)
+	GetByPersistentToken(token string) (*models.Product, error)
 	GetByMentorID(mentorID string, page, pageSize int) ([]models.Product, int64, error)
 	GetAll(page, pageSize int) ([]models.Product, int64, error)
 	Update(entity *models.Product) error
@@ -24,6 +25,17 @@ func NewProductRepository(db *gorm.DB) ProductRepository {
 
 func (r *productRepository) Create(entity *models.Product) error {
 	return r.db.Create(entity).Error
+}
+
+func (r *productRepository) GetByPersistentToken(token string) (*models.Product, error) {
+	var e models.Product
+	if err := r.db.First(&e, "persistent_token = ?", token).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &e, nil
 }
 
 func (r *productRepository) GetByID(id string) (*models.Product, error) {

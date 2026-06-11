@@ -3,15 +3,16 @@ import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getSession, clearSession } from '@/lib/auth';
 import { applyMentorTheme } from '@/lib/theme';
-import { 
-  Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut, 
-  Copy, Check, Star, RefreshCw, Link2, Share2, UserPlus, Loader2 
+import {
+  Users, BookOpen, TrendingUp, Palette, BarChart3, LogOut,
+  Copy, Check, Star, RefreshCw, Link2, Share2, UserPlus, Loader2, Infinity, Info
 } from 'lucide-react';
 
 interface ProductStat {
   id: string;
   name: string;
   active: boolean;
+  persistentToken: string | null;
   totalStudents: number;
   cardsReviewed: number;
   studentsToday: number;
@@ -30,6 +31,8 @@ const MentorDashboard: React.FC = () => {
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [inviteGenerating, setInviteGenerating] = useState<Record<string, boolean>>({});
   const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
+  const [persistentGenerating, setPersistentGenerating] = useState<Record<string, boolean>>({});
+  const [copiedPersistent, setCopiedPersistent] = useState<string | null>(null);
 
   const baseUrl = import.meta.env.PROD ? 'https://aprovacards.com.br' : window.location.origin;
 
@@ -96,6 +99,40 @@ const MentorDashboard: React.FC = () => {
     }
   };
 
+  const generatePersistentLink = async (productId: string) => {
+    setPersistentGenerating(prev => ({ ...prev, [productId]: true }));
+    try {
+      const token = crypto.randomUUID().replace(/-/g, '');
+      const { error } = await supabase
+        .from('products')
+        .update({ persistent_token: token })
+        .eq('id', productId);
+      if (error) throw error;
+      setProductStats(prev =>
+        prev.map(p => p.id === productId ? { ...p, persistentToken: token } : p)
+      );
+    } catch (e) {
+      console.error('Erro ao gerar link persistente:', e);
+    } finally {
+      setPersistentGenerating(prev => ({ ...prev, [productId]: false }));
+    }
+  };
+
+  const copyPersistentLink = async (productId: string, token: string) => {
+    await navigator.clipboard.writeText(`${baseUrl}/checkout?plink=${token}`);
+    setCopiedPersistent(productId);
+    setTimeout(() => setCopiedPersistent(null), 2000);
+  };
+
+  const sharePersistentLink = async (productId: string, productName: string, token: string) => {
+    const url = `${baseUrl}/checkout?plink=${token}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: `${productName} — Link de Pagamento`, url }); } catch {}
+    } else {
+      await copyPersistentLink(productId, token);
+    }
+  };
+
   useEffect(() => {
     if (!session || session.role !== 'mentor' || !session.mentor_id) {
       navigate('/login');
@@ -132,6 +169,7 @@ const MentorDashboard: React.FC = () => {
           id: p.id,
           name: p.name,
           active: p.active,
+          persistentToken: (p as any).persistent_token ?? null,
           totalStudents: Number(s?.total_students || 0),
           cardsReviewed: Number(s?.cards_reviewed || 0),
           studentsToday: Number(s?.students_today || 0),
@@ -278,9 +316,55 @@ const MentorDashboard: React.FC = () => {
                   >
                     {inviteGenerating[p.id]
                       ? <><Loader2 className="h-4 w-4 animate-spin" /> Gerando...</>
-                      : <><UserPlus className="h-4 w-4" /> Gerar link de pagamento</>}
+                      : <><UserPlus className="h-4 w-4" /> Gerar convite</>}
                   </button>
                 )}
+
+                {/* ── Persistent payment link ── */}
+                <div className="border-t border-border pt-3 mt-1">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Infinity className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="text-xs font-semibold text-foreground">Link Persistente</span>
+                    <div className="relative group">
+                      <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <p className="font-semibold text-foreground mb-1">Link de uso ilimitado</p>
+                        <p>Gerado uma vez e nunca expira. Ideal para colocar na landing page do produto — suporta campanhas de marketing sem precisar gerar novos links.</p>
+                        <p className="mt-1 text-primary/80">O link avulso acima é de uso único por aluno.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {p.persistentToken ? (
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 truncate rounded-xl bg-surface border border-border px-3 py-2 text-xs font-mono text-muted-foreground">
+                        {baseUrl}/checkout?plink={p.persistentToken}
+                      </code>
+                      <button
+                        onClick={() => copyPersistentLink(p.id, p.persistentToken!)}
+                        className="shrink-0 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10 flex items-center gap-1"
+                      >
+                        {copiedPersistent === p.id ? <><Check className="h-3 w-3" /> Copiado!</> : <><Copy className="h-3 w-3" /> Copiar</>}
+                      </button>
+                      <button
+                        onClick={() => sharePersistentLink(p.id, p.name, p.persistentToken!)}
+                        className="shrink-0 rounded-xl border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover flex items-center gap-1"
+                      >
+                        <Share2 className="h-3 w-3" /> Compartilhar
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => generatePersistentLink(p.id)}
+                      disabled={persistentGenerating[p.id]}
+                      className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                    >
+                      {persistentGenerating[p.id]
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Gerando...</>
+                        : <><Infinity className="h-4 w-4" /> Gerar link persistente</>}
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}

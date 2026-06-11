@@ -19,6 +19,7 @@ import { Loader2, AlertCircle, Eye, EyeOff, ExternalLink, GraduationCap } from '
 import { toast } from 'sonner';
 
 type Step = 'validating' | 'form' | 'redirecting' | 'invalid';
+type LinkMode = 'invite' | 'persistent';
 
 const signUpSchema = z.object({
   full_name: z.string().min(3, 'Nome deve ter no mínimo 3 caracteres').max(255),
@@ -51,6 +52,9 @@ const PageShell = ({ children }: { children: React.ReactNode }) => (
 export const StudentSignUpFlow: React.FC = () => {
   const [searchParams] = useSearchParams();
   const inviteCode = searchParams.get('code');
+  const productToken = searchParams.get('plink');
+
+  const linkMode: LinkMode = productToken ? 'persistent' : 'invite';
 
   const [step, setStep] = useState<Step>('validating');
   const [invitation, setInvitation] = useState<Invitation | null>(null);
@@ -63,14 +67,25 @@ export const StudentSignUpFlow: React.FC = () => {
   });
 
   useEffect(() => {
-    if (!inviteCode) { setStep('invalid'); return; }
+    if (!inviteCode && !productToken) { setStep('invalid'); return; }
 
     const validate = async () => {
       try {
-        const resp = await fetch(`${BACKEND}/api/v1/invite/validate`, {
+        let url: string;
+        let body: object;
+
+        if (linkMode === 'persistent') {
+          url = `${BACKEND}/api/v1/product-link/validate`;
+          body = { product_token: productToken };
+        } else {
+          url = `${BACKEND}/api/v1/invite/validate`;
+          body = { invite_code: inviteCode };
+        }
+
+        const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ invite_code: inviteCode }),
+          body: JSON.stringify(body),
         });
         const data = await resp.json();
         if (!data.success || !data.data?.is_valid) {
@@ -91,22 +106,28 @@ export const StudentSignUpFlow: React.FC = () => {
     };
 
     validate();
-  }, [inviteCode]);
+  }, [inviteCode, productToken]);
 
   const onSubmit = async (values: SignUpFormValues) => {
-    if (!inviteCode || !invitation) return;
+    if (!invitation) return;
     setSubmitting(true);
 
     try {
-      const initiateResp = await fetch(`${BACKEND}/api/v1/auth/signup/initiate`, {
+      let url: string;
+      let body: object;
+
+      if (linkMode === 'persistent') {
+        url = `${BACKEND}/api/v1/auth/signup/initiate-product-link`;
+        body = { product_token: productToken, email: values.email, password: values.password, full_name: values.full_name };
+      } else {
+        url = `${BACKEND}/api/v1/auth/signup/initiate`;
+        body = { invite_code: inviteCode, email: values.email, password: values.password, full_name: values.full_name };
+      }
+
+      const initiateResp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invite_code: inviteCode,
-          email: values.email,
-          password: values.password,
-          full_name: values.full_name,
-        }),
+        body: JSON.stringify(body),
       });
       const initiateData = await initiateResp.json();
       if (!initiateData.success) {

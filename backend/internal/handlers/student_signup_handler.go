@@ -112,6 +112,42 @@ func (h *StudentSignUpHandler) InitiateStudentSignUp(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result, Message: "Sign up initiated"})
 }
 
+// ValidateProductToken validates a persistent product link token (public, stateless)
+// POST /product-link/validate
+func (h *StudentSignUpHandler) ValidateProductToken(c *gin.Context) {
+	var req dto.ValidateProductLinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	result, err := h.usecase.ValidateProductToken(req.ProductToken)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result})
+}
+
+// InitiateStudentSignUpByProductLink creates a student account via a persistent product link
+// POST /auth/signup/initiate-product-link
+func (h *StudentSignUpHandler) InitiateStudentSignUpByProductLink(c *gin.Context) {
+	var req dto.StudentSignUpByProductLinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	result, err := h.usecase.InitiateStudentSignUpByProductLink(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.APIResponse{Success: true, Data: result, Message: "Sign up initiated"})
+}
+
 // BulkSignUp creates multiple student accounts without payment, for admin use
 // POST /admin/students/bulk-signup
 func (h *StudentSignUpHandler) BulkSignUp(c *gin.Context) {

@@ -297,12 +297,12 @@ func (h *StudentCardsHandler) getStudyCardsForStudent(email, productID, discipli
 	}
 
 	var cards []models.Card
-	if err := query.Order("\"order\" ASC").Find(&cards).Error; err != nil {
-		return nil, err
+	q := query.Order("random()")
+	if newLimit > 0 {
+		q = q.Limit(newLimit)
 	}
-
-	if studyMode == "new" && newLimit > 0 && len(cards) > newLimit {
-		cards = cards[:newLimit]
+	if err := q.Find(&cards).Error; err != nil {
+		return nil, err
 	}
 
 	// Nomes das disciplinas

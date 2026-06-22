@@ -326,9 +326,10 @@ const StudySession: React.FC = () => {
       setError(null);
       const isAll = disciplineId === 'all';
 
-      const url = `/api/v1/student/study-cards?product_id=${session!.product_id}${isAll ? '' : `&discipline_id=${disciplineId}`}&mode=${studyMode}&new_limit=${newLimit}`;
+      const url = `/api/v1/student/study-cards?product_id=${session!.product_id}${isAll ? '' : `&discipline_id=${disciplineId}`}&mode=${studyMode}&new_limit=${newLimit}&t=${sessionTimestamp || Date.now()}`;
       const res = await fetch(url, {
         method: 'GET',
+        cache: 'no-store',
         headers: {
           'Authorization': `Bearer ${session!.access_token}`,
           'Content-Type': 'application/json',

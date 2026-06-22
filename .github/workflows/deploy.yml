@@ -26,18 +26,19 @@ jobs:
           go mod download
           go test ./... -v -race -count=1
 
-  build:
+  deploy:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - name: Build frontend and backend via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          command_timeout: 10m
+          connect_timeout: 30s
+          command_timeout: 15m
           script: |
             set -e
             export PATH=$PATH:/usr/local/go/bin
@@ -70,45 +71,22 @@ jobs:
             CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/aprova-cards ./cmd/server/main.go
             cd ..
 
-            echo "✅ Build concluído!"
-
-  restart:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Restart services via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          command_timeout: 2m
-          script: |
-            set -e
-
-            echo "🔄 Parando processos antigos..."
+            echo "🔄 Reiniciando serviços..."
             pkill -f "bin/aprova-cards" 2>/dev/null || true
             pkill -f "serve -s dist" 2>/dev/null || true
-            sleep 3
+            sleep 2
 
-            echo "🚀 Iniciando backend..."
-            cd /opt/aprova-cards/backend
-            nohup ./bin/aprova-cards > /tmp/aprova-backend.log 2>&1 &
+            nohup ./backend/bin/aprova-cards > /tmp/aprova-backend.log 2>&1 &
             echo $! > /tmp/aprova-backend.pid
 
-            echo "🚀 Iniciando frontend..."
-            cd /opt/aprova-cards/frontend
-            nohup npx serve -s dist -l 5173 > /tmp/aprova-frontend.log 2>&1 &
+            nohup npx serve -s ./frontend/dist -l 5173 > /tmp/aprova-frontend.log 2>&1 &
             echo $! > /tmp/aprova-frontend.pid
 
             sleep 5
             if curl -sf http://localhost:8080/api/v1/health > /dev/null 2>&1; then
-              echo "✅ Backend healthy!"
+              echo "✅ Deploy concluído!"
             else
-              echo "❌ Backend health check failed!"
+              echo "❌ Backend health check falhou!"
               tail -30 /tmp/aprova-backend.log
               exit 1
             fi
-
-            echo "✅ Deploy concluído!"

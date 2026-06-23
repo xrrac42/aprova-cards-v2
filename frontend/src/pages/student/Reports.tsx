@@ -178,6 +178,7 @@ const Reports: React.FC = () => {
         {activeTab === 'today' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
+              {/* Cards revisados - TODO: implementar lógica para cards revisados
               <div className="rounded-2xl border border-border bg-card p-4">
                 <p className="font-display text-3xl font-bold text-foreground">{todayStats.reviewed}</p>
                 <p className="text-xs text-muted-foreground">Cards revisados</p>
@@ -186,6 +187,7 @@ const Reports: React.FC = () => {
                   <span className="text-xs text-muted-foreground">vs ontem</span>
                 </div>
               </div>
+              */}
               <div className="rounded-2xl border border-border bg-card p-4">
                 <p className="font-display text-3xl font-bold text-primary">{accuracy}%</p>
                 <p className="text-xs text-muted-foreground">Taxa de acerto</p>

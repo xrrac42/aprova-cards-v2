@@ -17,6 +17,10 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
+    environment:
+      # Anthropic API key — stored as OPENAI_API_KEY (legacy naming, technical debt)
+      # Set this in Coolify UI or export it in the shell before running docker compose
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
       - "8080:8080"
     healthcheck:

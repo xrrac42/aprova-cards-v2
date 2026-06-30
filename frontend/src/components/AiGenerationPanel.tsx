@@ -344,7 +344,7 @@ const AiGenerationPanel: React.FC = () => {
             <h2 className="font-semibold text-zinc-100">Console de Geração IA</h2>
           </div>
           <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-400">
-            Beta
+            Beta V0.1
           </span>
         </div>
 

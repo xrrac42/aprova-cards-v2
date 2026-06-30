@@ -1,7 +1,6 @@
 package usecases
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,7 +8,7 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"github.com/approva-cards/back-aprova-cards/internal/repositories"
-	"github.com/approva-cards/back-aprova-cards/pkg/openai"
+	"github.com/approva-cards/back-aprova-cards/pkg/anthropic"
 )
 
 type CardUseCase interface {
@@ -19,18 +18,20 @@ type CardUseCase interface {
 	Update(id string, req *dto.UpdateCardRequest) (*dto.CardResponse, error)
 	Delete(id string) error
 	GenerateWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.GenerateCardsResponse, error)
+	PreviewWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.PreviewCardsResponse, error)
+	BatchSave(disciplineID string, req *dto.BatchSaveRequest) (*dto.BatchSaveResponse, error)
 }
 
 type cardUseCase struct {
-	repo         repositories.CardRepository
-	discRepo     repositories.DisciplineRepository
-	openaiClient *openai.Client
+	repo            repositories.CardRepository
+	discRepo        repositories.DisciplineRepository
+	anthropicClient *anthropic.Client
 }
 
-func NewCardUseCase(repo repositories.CardRepository, discRepo repositories.DisciplineRepository, openaiClient ...*openai.Client) CardUseCase {
+func NewCardUseCase(repo repositories.CardRepository, discRepo repositories.DisciplineRepository, anthropicClient ...*anthropic.Client) CardUseCase {
 	uc := &cardUseCase{repo: repo, discRepo: discRepo}
-	if len(openaiClient) > 0 {
-		uc.openaiClient = openaiClient[0]
+	if len(anthropicClient) > 0 {
+		uc.anthropicClient = anthropicClient[0]
 	}
 	return uc
 }
@@ -116,8 +117,41 @@ func (uc *cardUseCase) Update(id string, req *dto.UpdateCardRequest) (*dto.CardR
 
 func (uc *cardUseCase) Delete(id string) error { return uc.repo.Delete(id) }
 
+// GenerateWithAI generates cards via Anthropic and immediately persists them.
+// Kept for backward compatibility with the legacy /admin/disciplines/:id/generate-ai route.
 func (uc *cardUseCase) GenerateWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.GenerateCardsResponse, error) {
-	if uc.openaiClient == nil {
+	preview, err := uc.PreviewWithAI(disciplineID, req)
+	if err != nil {
+		return nil, err
+	}
+
+	disc, err := uc.discRepo.GetByID(disciplineID)
+	if err != nil {
+		return nil, errors.New("disciplina não encontrada")
+	}
+
+	var created []dto.CardResponse
+	for i, pc := range preview.Cards {
+		card := &models.Card{
+			DisciplineID: disciplineID,
+			ProductID:    disc.ProductID,
+			Front:        pc.Front,
+			Back:         pc.Back,
+			Order:        i,
+		}
+		if err := uc.repo.Create(card); err != nil {
+			continue
+		}
+		created = append(created, *cardToDTO(card))
+	}
+
+	return &dto.GenerateCardsResponse{Cards: created, Generated: len(created)}, nil
+}
+
+// PreviewWithAI generates cards via Anthropic using Structured Outputs and returns them
+// without persisting — the caller reviews and approves before calling BatchSave.
+func (uc *cardUseCase) PreviewWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.PreviewCardsResponse, error) {
+	if uc.anthropicClient == nil {
 		return nil, errors.New("geração com IA não configurada (defina OPENAI_API_KEY)")
 	}
 
@@ -131,64 +165,114 @@ func (uc *cardUseCase) GenerateWithAI(disciplineID string, req *dto.GenerateCard
 		limit = 20
 	}
 
-	system := `Você é um especialista em criação de flashcards para estudantes brasileiros que se preparam para concursos e vestibulares.
-Crie flashcards concisos e precisos em português (pt-BR), baseados EXCLUSIVAMENTE no conteúdo do documento fornecido.
-Retorne SOMENTE um array JSON válido, sem texto adicional, markdown ou blocos de código.
-Cada item deve ter "front" (pergunta ou termo) e "back" (resposta ou definição).
-O campo "front" deve ser uma pergunta objetiva ou um conceito-chave extraído do documento.
-O campo "back" deve ser a resposta direta e completa, fiel ao conteúdo.`
+	system := buildSystemPrompt(req)
+	user := fmt.Sprintf(
+		"Disciplina: %s\nGere NO MÁXIMO %d flashcards com base no documento abaixo.\n\nDOCUMENTO:\n%s",
+		disc.Name, limit, req.Context,
+	)
 
-	user := fmt.Sprintf(`Com base no documento abaixo, crie NO MÁXIMO %d flashcards. Não ultrapasse esse limite.
-
-DOCUMENTO:
-%s
-
-Formato obrigatório: [{"front":"...","back":"..."},{"front":"...","back":"..."}]`, limit, req.Context)
-
-	content, err := uc.openaiClient.Chat(system, user)
+	output, err := uc.anthropicClient.GenerateCards(system, user)
 	if err != nil {
-		return nil, fmt.Errorf("erro ao chamar OpenAI: %w", err)
+		return nil, fmt.Errorf("erro ao chamar Anthropic: %w", err)
 	}
 
-	// Extrai o array JSON mesmo se houver texto extra
-	cleaned := strings.TrimSpace(content)
-	if start := strings.Index(cleaned, "["); start > 0 {
-		cleaned = cleaned[start:]
-	}
-	if end := strings.LastIndex(cleaned, "]"); end >= 0 && end < len(cleaned)-1 {
-		cleaned = cleaned[:end+1]
+	cards := make([]dto.PreviewCard, 0, len(output.Cards))
+	for i, c := range output.Cards {
+		if strings.TrimSpace(c.Front) == "" || strings.TrimSpace(c.Back) == "" {
+			continue
+		}
+		tags := c.TopicTags
+		if tags == nil {
+			tags = []string{}
+		}
+		cards = append(cards, dto.PreviewCard{
+			ID:         fmt.Sprintf("%d", i+1),
+			Front:      c.Front,
+			Back:       c.Back,
+			TopicTags:  tags,
+			Difficulty: c.Difficulty,
+		})
 	}
 
-	type rawCard struct {
-		Front string `json:"front"`
-		Back  string `json:"back"`
-	}
-	var rawCards []rawCard
-	if err := json.Unmarshal([]byte(cleaned), &rawCards); err != nil {
-		return nil, fmt.Errorf("resposta da IA não é JSON válido: %w", err)
+	return &dto.PreviewCardsResponse{Cards: cards, Generated: len(cards)}, nil
+}
+
+// BatchSave persists a list of human-approved cards to the database.
+func (uc *cardUseCase) BatchSave(disciplineID string, req *dto.BatchSaveRequest) (*dto.BatchSaveResponse, error) {
+	if len(req.Cards) == 0 {
+		return nil, errors.New("nenhum card para salvar")
 	}
 
-	var created []dto.CardResponse
-	for i, rc := range rawCards {
-		if strings.TrimSpace(rc.Front) == "" || strings.TrimSpace(rc.Back) == "" {
+	disc, err := uc.discRepo.GetByID(disciplineID)
+	if err != nil {
+		return nil, errors.New("disciplina não encontrada")
+	}
+
+	var saved []dto.CardResponse
+	for i, bc := range req.Cards {
+		if strings.TrimSpace(bc.Front) == "" || strings.TrimSpace(bc.Back) == "" {
 			continue
 		}
 		card := &models.Card{
 			DisciplineID: disciplineID,
 			ProductID:    disc.ProductID,
-			Front:        rc.Front,
-			Back:         rc.Back,
+			Front:        bc.Front,
+			Back:         bc.Back,
 			Order:        i,
 		}
 		if err := uc.repo.Create(card); err != nil {
 			continue
 		}
-		created = append(created, *cardToDTO(card))
+		saved = append(saved, *cardToDTO(card))
 	}
 
-	return &dto.GenerateCardsResponse{Cards: created, Generated: len(created)}, nil
+	return &dto.BatchSaveResponse{Cards: saved, Saved: len(saved)}, nil
+}
+
+func buildSystemPrompt(req *dto.GenerateCardsRequest) string {
+	archetypeDesc := map[string]string{
+		"qa":    "Q&A Direto — Frente: pergunta objetiva. Verso: resposta direta e completa.",
+		"cloze": "Preencher Lacuna — Frente: frase com [ __ ] para completar. Verso: termo correto + explicação.",
+		"case":  "Caso Hipotético — Frente: situação prática hipotética. Verso: análise jurídica completa.",
+	}
+	presetDesc := map[string]string{
+		"default":      "Linguagem didática e clara para estudantes gerais.",
+		"cespe":        "Foco em alternativas CERTO/ERRADO, com afirmações precisas nos moldes CESPE/CEBRASPE.",
+		"oab":          "Questões OAB com raciocínio jurídico e legislação vigente.",
+		"magistratura": "Questões aprofundadas para magistratura, com doutrina e jurisprudência.",
+	}
+
+	archDesc := archetypeDesc[req.Archetype]
+	if archDesc == "" {
+		archDesc = archetypeDesc["qa"]
+	}
+	preDesc := presetDesc[req.Preset]
+	if preDesc == "" {
+		preDesc = presetDesc["default"]
+	}
+
+	system := fmt.Sprintf(
+		"Você é um especialista em criação de flashcards para concursos públicos brasileiros.\n"+
+			"Crie flashcards concisos e precisos em português (pt-BR), baseados EXCLUSIVAMENTE no conteúdo fornecido.\n\n"+
+			"Arquétipo: %s\nEstilo de banca: %s",
+		archDesc, preDesc,
+	)
+
+	if req.RegraDeOuro != "" {
+		system += fmt.Sprintf("\nInstrução do mentor: %s", req.RegraDeOuro)
+	}
+
+	return system
 }
 
 func cardToDTO(e *models.Card) *dto.CardResponse {
-	return &dto.CardResponse{ID: e.ID, DisciplineID: e.DisciplineID, ProductID: e.ProductID, Front: e.Front, Back: e.Back, Order: e.Order, CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z")}
+	return &dto.CardResponse{
+		ID:           e.ID,
+		DisciplineID: e.DisciplineID,
+		ProductID:    e.ProductID,
+		Front:        e.Front,
+		Back:         e.Back,
+		Order:        e.Order,
+		CreatedAt:    e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}
 }

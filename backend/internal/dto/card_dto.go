@@ -24,13 +24,50 @@ type CardResponse struct {
 }
 
 type GenerateCardsRequest struct {
-	Context string `json:"context" binding:"required,min=10"`
-	Limit   int    `json:"limit"`
+	Context     string `json:"context" binding:"required,min=10"`
+	Limit       int    `json:"limit"`
+	Archetype   string `json:"archetype"`    // qa | cloze | case
+	Preset      string `json:"preset"`       // default | cespe | oab | magistratura
+	RegraDeOuro string `json:"regra_de_ouro"`
 }
 
 type GenerateCardsResponse struct {
 	Cards     []CardResponse `json:"cards"`
 	Generated int            `json:"generated"`
+}
+
+// PreviewCard is a card returned for human review — not yet persisted.
+type PreviewCard struct {
+	ID         string   `json:"id"`
+	Front      string   `json:"front"`
+	Back       string   `json:"back"`
+	TopicTags  []string `json:"topic_tags"`
+	Difficulty string   `json:"difficulty"`
+}
+
+// PreviewCardsResponse is the response from the generate-ai-preview endpoint.
+type PreviewCardsResponse struct {
+	Cards     []PreviewCard `json:"cards"`
+	Generated int           `json:"generated"`
+}
+
+// BatchSaveCard is one card submitted for persistence after human review.
+type BatchSaveCard struct {
+	Front      string   `json:"front" binding:"required"`
+	Back       string   `json:"back" binding:"required"`
+	TopicTags  []string `json:"topic_tags"`
+	Difficulty string   `json:"difficulty"`
+}
+
+// BatchSaveRequest is the payload for the batch-save endpoint.
+type BatchSaveRequest struct {
+	Cards []BatchSaveCard `json:"cards" binding:"required"`
+}
+
+// BatchSaveResponse is the response from the batch-save endpoint.
+type BatchSaveResponse struct {
+	Cards []CardResponse `json:"cards"`
+	Saved int            `json:"saved"`
 }
 
 // Student view DTOs

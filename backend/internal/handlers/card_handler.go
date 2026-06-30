@@ -96,3 +96,41 @@ func (h *CardHandler) GenerateWithAI(c *gin.Context) {
 		Message: fmt.Sprintf("%d cards gerados com IA", r.Generated),
 	})
 }
+
+// PreviewWithAI generates cards via Anthropic and returns them for human review without saving.
+func (h *CardHandler) PreviewWithAI(c *gin.Context) {
+	var req dto.GenerateCardsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+	r, err := h.usecase.PreviewWithAI(c.Param("id"), &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.APIResponse{
+		Success: true,
+		Data:    r,
+		Message: fmt.Sprintf("%d cards gerados para revisão", r.Generated),
+	})
+}
+
+// BatchSave persists a list of human-approved cards to the database.
+func (h *CardHandler) BatchSave(c *gin.Context) {
+	var req dto.BatchSaveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+	r, err := h.usecase.BatchSave(c.Param("id"), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.APIResponse{Success: false, Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, dto.APIResponse{
+		Success: true,
+		Data:    r,
+		Message: fmt.Sprintf("%d cards salvos", r.Saved),
+	})
+}

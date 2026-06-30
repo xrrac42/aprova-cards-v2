@@ -11,7 +11,8 @@ import (
 	appauth "github.com/approva-cards/back-aprova-cards/pkg/auth"
 	emailsvc "github.com/approva-cards/back-aprova-cards/pkg/email"
 	"github.com/approva-cards/back-aprova-cards/pkg/middleware"
-	aiclient "github.com/approva-cards/back-aprova-cards/pkg/openai"
+	// OPENAI_API_KEY env name is intentional legacy — it holds the Anthropic key (technical debt)
+	anthropicclient "github.com/approva-cards/back-aprova-cards/pkg/anthropic"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -120,13 +121,16 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.POST("/admin/disciplines/:id/reorder", discHandlerAdmin.Reorder)
 
 	// ---- AI Card Generation (public admin route, requires OPENAI_API_KEY) ----
-	openaiCli := aiclient.NewClient(cfg.OpenAI.APIKey)
+	// OPENAI_API_KEY holds the Anthropic key — legacy env name, kept as technical debt
+	anthropicCli := anthropicclient.NewClient(cfg.OpenAI.APIKey)
 	aiCardRepo := repositories.NewCardRepository(db)
 	aiDiscRepo := repositories.NewDisciplineRepository(db)
-	aiCardUC := usecases.NewCardUseCase(aiCardRepo, aiDiscRepo, openaiCli)
+	aiCardUC := usecases.NewCardUseCase(aiCardRepo, aiDiscRepo, anthropicCli)
 	aiCardHandler := handlers.NewCardHandler(aiCardUC)
 	api.GET("/admin/products/:id/cards", aiCardHandler.GetByProductID)
 	api.POST("/admin/disciplines/:id/generate-ai", aiCardHandler.GenerateWithAI)
+	api.POST("/admin/disciplines/:id/generate-ai-preview", aiCardHandler.PreviewWithAI)
+	api.POST("/admin/disciplines/:id/cards/batch", aiCardHandler.BatchSave)
 
 	healthCheckHandler := handlers.NewHealthCheckHandler(db)
 	api.GET("/admin/health-check", healthCheckHandler.Check)

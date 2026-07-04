@@ -72,16 +72,54 @@ func (h *StudentCardsHandler) GetStudentHome(c *gin.Context) {
 		countMap[r.DisciplineID] = r.Count
 	}
 
+	// Revisões vencidas por disciplina (progresso existente com next_review <= hoje)
+	var dueCounts []countRow
+	h.db.Model(&models.Card{}).
+		Select("cards.discipline_id, count(*) as count").
+		Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", studentEmail).
+		Where("cards.product_id = ?", productID).
+		Where("sp.next_review <= CURRENT_DATE").
+		Group("cards.discipline_id").
+		Scan(&dueCounts)
+	dueMap := make(map[string]int, len(dueCounts))
+	for _, r := range dueCounts {
+		dueMap[r.DisciplineID] = r.Count
+	}
+
+	// Cards já estudados por disciplina (qualquer registro de progresso)
+	var studiedCounts []countRow
+	h.db.Model(&models.Card{}).
+		Select("cards.discipline_id, count(*) as count").
+		Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", studentEmail).
+		Where("cards.product_id = ?", productID).
+		Group("cards.discipline_id").
+		Scan(&studiedCounts)
+	studiedMap := make(map[string]int, len(studiedCounts))
+	for _, r := range studiedCounts {
+		studiedMap[r.DisciplineID] = r.Count
+	}
+
 	totalCards := 0
+	totalReviewsDue := 0
+	totalNewCards := 0
 	discStats := make([]dto.StudentDisciplineStat, 0, len(disciplines))
 	for _, d := range disciplines {
 		cnt := countMap[d.ID]
+		due := dueMap[d.ID]
+		newCards := cnt - studiedMap[d.ID]
+		if newCards < 0 {
+			newCards = 0
+		}
 		totalCards += cnt
+		totalReviewsDue += due
+		totalNewCards += newCards
 		discStats = append(discStats, dto.StudentDisciplineStat{
 			ID:         d.ID,
 			Name:       d.Name,
 			Order:      d.Order,
 			TotalCards: cnt,
+			ReviewsDue: due,
+			NewCards:   newCards,
 		})
 	}
 
@@ -104,9 +142,11 @@ func (h *StudentCardsHandler) GetStudentHome(c *gin.Context) {
 				Name:          product.Name,
 				CoverImageURL: product.CoverImageURL,
 			},
-			Mentor:      mentor,
-			Disciplines: discStats,
-			TotalCards:  totalCards,
+			Mentor:          mentor,
+			Disciplines:     discStats,
+			TotalCards:      totalCards,
+			TotalReviewsDue: totalReviewsDue,
+			TotalNewCards:   totalNewCards,
 		},
 	})
 }
@@ -182,7 +222,7 @@ func (h *StudentCardsHandler) GetStudyCards(c *gin.Context) {
 	email := studentEmail.(string)
 	productID := c.Query("product_id")
 	disciplineID := c.Query("discipline_id")
-	studyMode := c.DefaultQuery("mode", "new") // new, review, all
+	studyMode := c.DefaultQuery("mode", "mixed") // new, review, mixed (all = alias de mixed)
 	newLimit := 0
 	if limit := c.Query("new_limit"); limit != "" {
 		fmt.Sscanf(limit, "%d", &newLimit)
@@ -288,21 +328,49 @@ func (h *StudentCardsHandler) getDisciplinesWithCards(productID string) ([]dto.S
 }
 
 // getStudyCardsForStudent retorna cards para estudo com filtros e dados de progresso do aluno.
-// Modo: "new" (só novos), "review" (só para revisar), "all" (todos)
+// Modo: "new" (só cards sem progresso), "review" (só cards com next_review vencido),
+// "mixed"/"all" (revisões vencidas + novos até o newLimit)
 func (h *StudentCardsHandler) getStudyCardsForStudent(email, productID, disciplineID, studyMode string, newLimit int) ([]dto.StudentCardResponse, error) {
-	// Query base
-	query := h.db.Where("product_id = ?", productID)
-	if disciplineID != "" && disciplineID != "all" {
-		query = query.Where("discipline_id = ?", disciplineID)
+	baseQuery := func() *gorm.DB {
+		q := h.db.Model(&models.Card{}).Select("cards.*").Where("cards.product_id = ?", productID)
+		if disciplineID != "" && disciplineID != "all" {
+			q = q.Where("cards.discipline_id = ?", disciplineID)
+		}
+		return q
 	}
 
+	needReview := studyMode == "review" || studyMode == "mixed" || studyMode == "all"
+	needNew := studyMode == "new" || studyMode == "mixed" || studyMode == "all"
+
 	var cards []models.Card
-	q := query.Order("random()")
-	if newLimit > 0 {
-		q = q.Limit(newLimit)
+
+	// Revisões vencidas: cards que o aluno já viu e cujo next_review chegou
+	if needReview {
+		var reviewCards []models.Card
+		if err := baseQuery().
+			Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", email).
+			Where("sp.next_review <= CURRENT_DATE").
+			Order("random()").
+			Find(&reviewCards).Error; err != nil {
+			return nil, err
+		}
+		cards = append(cards, reviewCards...)
 	}
-	if err := q.Find(&cards).Error; err != nil {
-		return nil, err
+
+	// Cards novos: sem nenhum registro de progresso para este aluno
+	if needNew {
+		q := baseQuery().
+			Joins("LEFT JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", email).
+			Where("sp.id IS NULL").
+			Order("random()")
+		if newLimit > 0 {
+			q = q.Limit(newLimit)
+		}
+		var newCards []models.Card
+		if err := q.Find(&newCards).Error; err != nil {
+			return nil, err
+		}
+		cards = append(cards, newCards...)
 	}
 
 	// Nomes das disciplinas

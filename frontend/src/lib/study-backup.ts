@@ -53,7 +53,9 @@ export async function syncBackup(email: string, productId: string): Promise<numb
     let synced = 0;
     for (const item of backup) {
       try {
-        await supabase.from('student_progress').upsert({
+        // supabase-js v2 não lança exceção — checar o error do retorno,
+        // senão o backup era apagado mesmo com todos os upserts falhando
+        const { error } = await supabase.from('student_progress').upsert({
           student_email: email,
           card_id: item.card_id,
           product_id: item.product_id,
@@ -63,6 +65,7 @@ export async function syncBackup(email: string, productId: string): Promise<numb
           correct_count: item.correct_count,
           incorrect_count: item.incorrect_count,
         }, { onConflict: 'student_email,card_id' });
+        if (error) break;
         synced++;
       } catch {
         break;

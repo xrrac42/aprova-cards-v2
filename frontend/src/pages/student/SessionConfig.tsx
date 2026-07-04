@@ -27,6 +27,15 @@ const MODE_INFO: Record<StudyMode, { icon: React.ReactNode; label: string; messa
 };
 const DEFAULT_NEW_LIMIT = 50;
 
+interface DisciplineStat {
+  id: string;
+  name: string;
+  order: number;
+  total_cards: number;
+  reviews_due?: number;
+  new_cards?: number;
+}
+
 const SessionConfig: React.FC = () => {
   const { disciplineId } = useParams<{ disciplineId: string }>();
   const navigate = useNavigate();
@@ -43,6 +52,8 @@ const SessionConfig: React.FC = () => {
   useEffect(() => {
     if (!session || session.role !== 'aluno' || !session.product_id) { navigate('/login'); return; }
     loadStats();
+    // Effect intencional de mount-only: loadStats/session/navigate são estáveis neste ciclo
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadStats = async () => {
@@ -66,34 +77,45 @@ const SessionConfig: React.FC = () => {
         throw new Error(json.error || 'Failed to load stats');
       }
 
-      const { mentor, disciplines } = json.data;
+      const { mentor, disciplines } = json.data as {
+        mentor: { primary_color?: string; secondary_color?: string } | null;
+        disciplines: DisciplineStat[];
+      };
 
       // Apply mentor theme if available
       if (mentor?.primary_color && mentor?.secondary_color) {
         applyMentorTheme(mentor.primary_color, mentor.secondary_color);
       }
 
+      let reviewsDueCount = 0;
       if (isAll) {
         setDisciplineName('Todas as disciplinas');
         let total = 0;
+        let due = 0;
+        let fresh = 0;
         for (const d of disciplines) {
           total += Number(d.total_cards);
+          due += Number(d.reviews_due || 0);
+          fresh += Number(d.new_cards || 0);
         }
         setTotalCards(total);
-        setReviewsDue(0); // Not available from this endpoint
-        setNewAvailable(total);
+        setReviewsDue(due);
+        setNewAvailable(fresh);
+        reviewsDueCount = due;
       } else {
-        const disc = disciplines.find((d: any) => d.id === disciplineId);
+        const disc = disciplines.find((d) => d.id === disciplineId);
         if (disc) {
           setDisciplineName(disc.name);
           setTotalCards(Number(disc.total_cards));
-          setReviewsDue(0); // Not available from this endpoint
-          setNewAvailable(Number(disc.total_cards));
+          setReviewsDue(Number(disc.reviews_due || 0));
+          setNewAvailable(Number(disc.new_cards || 0));
+          reviewsDueCount = Number(disc.reviews_due || 0);
         }
       }
 
-      // Default mode to 'new' since we don't have review stats from this endpoint
-      setMode('new');
+      // Com revisões pendentes, o modo padrão prioriza consolidação (mixed);
+      // sem pendências, começa direto nos cards novos
+      setMode(reviewsDueCount > 0 ? 'mixed' : 'new');
     } catch (err) {
       console.error('Error loading stats:', err);
       // Set defaults on error

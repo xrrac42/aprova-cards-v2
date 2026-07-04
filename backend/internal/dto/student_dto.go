@@ -21,13 +21,17 @@ type StudentDisciplineStat struct {
 	Name       string `json:"name"`
 	Order      int    `json:"order"`
 	TotalCards int    `json:"total_cards"`
+	ReviewsDue int    `json:"reviews_due"`
+	NewCards   int    `json:"new_cards"`
 }
 
 type StudentHomeResponse struct {
-	Product     StudentProductInfo      `json:"product"`
-	Mentor      StudentMentorInfo       `json:"mentor"`
-	Disciplines []StudentDisciplineStat `json:"disciplines"`
-	TotalCards  int                     `json:"total_cards"`
+	Product         StudentProductInfo      `json:"product"`
+	Mentor          StudentMentorInfo       `json:"mentor"`
+	Disciplines     []StudentDisciplineStat `json:"disciplines"`
+	TotalCards      int                     `json:"total_cards"`
+	TotalReviewsDue int                     `json:"total_reviews_due"`
+	TotalNewCards   int                     `json:"total_new_cards"`
 }
 
 // ─── Student Access ───────────────────────────────────────────────────────────

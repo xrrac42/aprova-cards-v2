@@ -7,6 +7,10 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { Progress } from '@/components/ui/progress';
+import { startGenerationJob } from '@/lib/generation-api';
+import { useGenerationJobPolling } from '@/hooks/useGenerationJobPolling';
+import type { GenerationJobStatus } from '@/types/ai-generation';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -20,15 +24,14 @@ interface DataItem { id: string; name: string; }
 
 interface GeneratedCard { id: string; front: string; back: string; }
 
-const LOADING_PHASES = [
-  { label: 'Iniciando geração…',     sub: 'Conectando com a IA' },
-  { label: 'Lendo o documento…',     sub: 'Analisando o conteúdo fornecido' },
-  { label: 'Estruturando os cards…', sub: 'Aplicando suas diretrizes didáticas' },
-  { label: 'Quase lá…',              sub: 'A IA está finalizando os flashcards' },
-  { label: 'Só mais um pouco…',      sub: 'Revisando a qualidade gerada' },
-];
-
-const LOADING_PROGRESS = [5, 25, 50, 72, 88];
+const STATUS_LABELS: Record<GenerationJobStatus, { label: string; sub: string }> = {
+  pending:    { label: 'Preparando documento…',       sub: 'Dividindo o conteúdo em partes' },
+  processing: { label: 'Processando partes…',         sub: 'Gerando cards em paralelo' },
+  reducing:   { label: 'Combinando resultados…',      sub: 'Removendo cards duplicados' },
+  reviewing:  { label: 'Revisão final de qualidade…', sub: 'A IA está validando os flashcards' },
+  completed:  { label: 'Concluído',                   sub: '' },
+  failed:     { label: 'Falhou',                      sub: '' },
+};
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -174,17 +177,31 @@ const AiGenerationPanel: React.FC = () => {
   const [editedCards, setEditedCards]   = useState<GeneratedCard[]>([]);
   const [saving, setSaving]             = useState(false);
   const [apiMsg, setApiMsg]             = useState('');
-  const [loadingStep, setLoadingStep]   = useState(0);
+  const [jobId, setJobId]               = useState<string | null>(null);
 
-  // ── Loading step cycle ────────────────────────────────────────────────────
+  const { status: jobStatus } = useGenerationJobPolling(selectedDiscipline || null, jobId);
+
+  // ── React to job progress ─────────────────────────────────────────────────
 
   useEffect(() => {
-    if (modalState !== 'loading') { setLoadingStep(0); return; }
-    const id = setInterval(() => {
-      setLoadingStep(prev => Math.min(prev + 1, LOADING_PHASES.length - 1));
-    }, 8000);
-    return () => clearInterval(id);
-  }, [modalState]);
+    if (!jobStatus) return;
+    if (jobStatus.status === 'completed') {
+      const rawCards = jobStatus.result?.cards ?? [];
+      const cards = rawCards.map((c, i) => ({ id: String(i + 1), front: c.front, back: c.back }));
+      if (cards.length === 0) {
+        setApiMsg('❌ A IA não gerou nenhum card. Tente fornecer mais contexto ou ajustar as diretrizes.');
+        setModalState('closed');
+      } else {
+        setEditedCards(cards);
+        setModalState('review');
+      }
+      setJobId(null);
+    } else if (jobStatus.status === 'failed') {
+      setApiMsg(`❌ ${jobStatus.error || 'Erro ao gerar cards'}`);
+      setModalState('closed');
+      setJobId(null);
+    }
+  }, [jobStatus]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
@@ -223,7 +240,9 @@ const AiGenerationPanel: React.FC = () => {
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
-          text += content.items.map((item: { str: string }) => item.str).join(' ') + '\n';
+          // Page marker gives the backend chunker (pkg/chunker) a real
+          // page-aligned cut point when splitting large documents.
+          text += content.items.map((item: { str: string }) => item.str).join(' ') + `\n\n[[PAGE ${i}]]\n\n`;
         }
         setAiDocText(text.trim());
       } finally {
@@ -256,39 +275,17 @@ const AiGenerationPanel: React.FC = () => {
     setModalState('loading');
     setEditedCards([]);
 
-    const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
     try {
-      const res = await fetch(
-        `${backendURL}/api/v1/admin/disciplines/${selectedDiscipline}/generate-ai-preview`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            context: aiDocText,
-            limit: isSample ? 1 : limit,
-            archetype,
-            preset,
-            regra_de_ouro: regraDeOuro,
-          }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setApiMsg(`❌ ${data.error || 'Erro ao gerar cards'}`);
-        setModalState('closed');
-        return;
-      }
-      const rawCards: Array<{ front: string; back: string }> = data.data?.cards ?? [];
-      const cards = rawCards.map((c, i) => ({ id: String(i + 1), front: c.front, back: c.back }));
-      if (cards.length === 0) {
-        setApiMsg('❌ A IA não gerou nenhum card. Tente fornecer mais contexto ou ajustar as diretrizes.');
-        setModalState('closed');
-        return;
-      }
-      setEditedCards(cards);
-      setModalState('review');
-    } catch {
-      setApiMsg('❌ Erro de conexão com o servidor');
+      const res = await startGenerationJob(selectedDiscipline, {
+        context: aiDocText,
+        limit: isSample ? 1 : limit,
+        archetype,
+        preset,
+        regra_de_ouro: regraDeOuro,
+      });
+      setJobId(res.job_id);
+    } catch (err) {
+      setApiMsg(`❌ ${err instanceof Error ? err.message : 'Erro ao gerar cards'}`);
       setModalState('closed');
     }
   };
@@ -625,30 +622,24 @@ const AiGenerationPanel: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Phase label — fades via key change */}
+                {/* Phase label — driven by the job's real status, not a timer */}
                 <div className="text-center">
-                  <p key={`label-${loadingStep}`} className="font-semibold text-zinc-100 transition-opacity duration-500">
-                    {LOADING_PHASES[loadingStep].label}
+                  <p key={`label-${jobStatus?.status ?? 'pending'}`} className="font-semibold text-zinc-100 transition-opacity duration-500">
+                    {STATUS_LABELS[jobStatus?.status ?? 'pending'].label}
                   </p>
-                  <p key={`sub-${loadingStep}`} className="mt-1 text-sm text-zinc-500 transition-opacity duration-500">
-                    {LOADING_PHASES[loadingStep].sub}
+                  <p key={`sub-${jobStatus?.status ?? 'pending'}`} className="mt-1 text-sm text-zinc-500 transition-opacity duration-500">
+                    {jobStatus?.status === 'processing'
+                      ? `${jobStatus.completed_chunks} de ${jobStatus.total_chunks} partes concluídas`
+                      : STATUS_LABELS[jobStatus?.status ?? 'pending'].sub}
                   </p>
                 </div>
 
-                {/* Progress bar */}
+                {/* Progress bar — real completed_chunks / total_chunks from polling */}
                 <div className="w-full max-w-xs space-y-2">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-violet-500 transition-all duration-[1200ms] ease-out"
-                      style={{ width: `${LOADING_PROGRESS[loadingStep]}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
+                  <Progress value={jobStatus?.progress_pct ?? 0} className="h-1.5 bg-zinc-800 [&>div]:bg-violet-500" />
+                  <div className="flex items-center justify-end">
                     <span className="text-[10px] text-zinc-600">
-                      Passo {loadingStep + 1} de {LOADING_PHASES.length}
-                    </span>
-                    <span className="text-[10px] text-zinc-600">
-                      {LOADING_PROGRESS[loadingStep]}%
+                      {jobStatus?.progress_pct ?? 0}%
                     </span>
                   </div>
                 </div>

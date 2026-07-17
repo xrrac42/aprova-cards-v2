@@ -31,11 +31,6 @@ type GenerateCardsRequest struct {
 	RegraDeOuro string `json:"regra_de_ouro"`
 }
 
-type GenerateCardsResponse struct {
-	Cards     []CardResponse `json:"cards"`
-	Generated int            `json:"generated"`
-}
-
 // PreviewCard is a card returned for human review — not yet persisted.
 type PreviewCard struct {
 	ID         string   `json:"id"`

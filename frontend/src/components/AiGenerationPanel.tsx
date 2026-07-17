@@ -338,7 +338,7 @@ const AiGenerationPanel: React.FC = () => {
         <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
           <div className="flex items-center gap-2.5">
             <Sparkles className="h-4.5 w-4.5 text-violet-400" />
-            <h2 className="font-semibold text-zinc-100">Console de Geração IA</h2>
+            <h2 className="font-semibold text-zinc-100">Console de Geração IA (Homologacao)</h2>
           </div>
           <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-400">
             Beta V0.1

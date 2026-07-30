@@ -128,6 +128,19 @@ func (c *Config) GetDSN() string {
 	)
 }
 
+// GetPgxDSN returns a URL-form Postgres DSN, as required by pgxpool/River
+// (GetDSN returns the space-separated form GORM expects).
+func (c *Config) GetPgxDSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		c.Database.User,
+		c.Database.Password,
+		c.Database.Host,
+		c.Database.Port,
+		c.Database.Name,
+		c.Database.SSLMode,
+	)
+}
+
 func getEnv(key, defaultVal string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value

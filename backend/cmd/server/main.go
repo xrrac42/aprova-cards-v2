@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -10,10 +11,15 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/usecases"
 	appauth "github.com/approva-cards/back-aprova-cards/pkg/auth"
 	emailsvc "github.com/approva-cards/back-aprova-cards/pkg/email"
+	"github.com/approva-cards/back-aprova-cards/pkg/jobs"
 	"github.com/approva-cards/back-aprova-cards/pkg/middleware"
 	// OPENAI_API_KEY env name is intentional legacy — it holds the Anthropic key (technical debt)
 	anthropicclient "github.com/approva-cards/back-aprova-cards/pkg/anthropic"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -23,6 +29,7 @@ func main() {
 	cfg := config.Load()
 
 	db := connectDatabase(cfg)
+	_, generationUC := setupGeneration(cfg, db)
 
 	if cfg.Server.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -39,7 +46,7 @@ func main() {
 	globalLimiter := middleware.NewRateLimiter(cfg.RateLimit.Requests, cfg.RateLimit.WindowSeconds)
 	engine.Use(middleware.RateLimitByIP(globalLimiter))
 
-	setupRoutes(engine, db, cfg)
+	setupRoutes(engine, db, cfg, generationUC)
 
 	port := ":" + cfg.Server.Port
 	fmt.Printf("🚀 Server running on http://localhost%s\n", port)
@@ -47,6 +54,56 @@ func main() {
 	if err := engine.Run(port); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
+}
+
+// setupGeneration wires the async, chunked AI card generation pipeline:
+// a pgx pool + River client (bounding concurrent Anthropic calls via
+// QueueChunks' MaxWorkers, never manual goroutine fan-out) and the two
+// workers that drive it. River is started here, before the HTTP server,
+// and runs its own background goroutines for the lifetime of the process —
+// there's no graceful Stop() wired up yet, matching the server's existing
+// lack of graceful shutdown for Gin.
+func setupGeneration(cfg *config.Config, db *gorm.DB) (*river.Client[pgx.Tx], usecases.GenerationUseCase) {
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, cfg.GetPgxDSN())
+	if err != nil {
+		log.Fatalf("failed to create pgx pool for River: %v", err)
+	}
+
+	anthropicCli := anthropicclient.NewClient(cfg.OpenAI.APIKey)
+	genJobRepo := repositories.NewGenerationJobRepository(db)
+	genChunkRepo := repositories.NewGenerationChunkRepository(db)
+	genDiscRepo := repositories.NewDisciplineRepository(db)
+
+	workers := river.NewWorkers()
+	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Workers: workers,
+		Queues: map[string]river.QueueConfig{
+			jobs.QueueChunks: {MaxWorkers: 6},
+			jobs.QueueReduce: {MaxWorkers: 2},
+		},
+	})
+	if err != nil {
+		log.Fatalf("failed to create river client: %v", err)
+	}
+
+	enqueuer := jobs.NewEnqueuer(riverClient)
+	generationUC := usecases.NewGenerationUseCase(genJobRepo, genChunkRepo, genDiscRepo, anthropicCli, enqueuer)
+
+	// Registered on the *river.Workers pointer after NewClient (which only
+	// stores the reference) but before Start — this is what breaks the
+	// otherwise-circular dependency: workers need generationUC, which needs
+	// an enqueuer, which needs the client that NewClient just produced.
+	river.AddWorker(workers, &jobs.ChunkWorker{UC: generationUC})
+	river.AddWorker(workers, &jobs.ReduceWorker{UC: generationUC})
+
+	if err := riverClient.Start(ctx); err != nil {
+		log.Fatalf("failed to start river client: %v", err)
+	}
+	fmt.Println("✅ River job queue started (ai_chunks, ai_reduce)")
+
+	return riverClient, generationUC
 }
 
 func connectDatabase(cfg *config.Config) *gorm.DB {
@@ -68,7 +125,7 @@ func connectDatabase(cfg *config.Config) *gorm.DB {
 	return db
 }
 
-func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
+func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config, generationUC usecases.GenerationUseCase) {
 	api := engine.Group("/api/v1")
 	supabaseAdminClient := appauth.NewSupabaseAdminClient(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey)
 	if supabaseAdminClient.IsConfigured() {
@@ -120,17 +177,19 @@ func setupRoutes(engine *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	api.DELETE("/admin/disciplines/:id", discHandlerAdmin.Delete)
 	api.POST("/admin/disciplines/:id/reorder", discHandlerAdmin.Reorder)
 
-	// ---- AI Card Generation (public admin route, requires OPENAI_API_KEY) ----
-	// OPENAI_API_KEY holds the Anthropic key — legacy env name, kept as technical debt
-	anthropicCli := anthropicclient.NewClient(cfg.OpenAI.APIKey)
+	// ---- AI Card Generation (public admin routes) ----
 	aiCardRepo := repositories.NewCardRepository(db)
 	aiDiscRepo := repositories.NewDisciplineRepository(db)
-	aiCardUC := usecases.NewCardUseCase(aiCardRepo, aiDiscRepo, anthropicCli)
+	aiCardUC := usecases.NewCardUseCase(aiCardRepo, aiDiscRepo)
 	aiCardHandler := handlers.NewCardHandler(aiCardUC)
 	api.GET("/admin/products/:id/cards", aiCardHandler.GetByProductID)
-	api.POST("/admin/disciplines/:id/generate-ai", aiCardHandler.GenerateWithAI)
-	api.POST("/admin/disciplines/:id/generate-ai-preview", aiCardHandler.PreviewWithAI)
 	api.POST("/admin/disciplines/:id/cards/batch", aiCardHandler.BatchSave)
+
+	// Async, chunked, map-reduce generation (requires OPENAI_API_KEY, which
+	// legacy-holds the Anthropic key — see setupGeneration in this file).
+	genHandler := handlers.NewGenerationHandler(generationUC)
+	api.POST("/admin/disciplines/:id/generation-jobs", genHandler.StartJob)
+	api.GET("/admin/disciplines/:id/generation-jobs/:jobId", genHandler.GetStatus)
 
 	healthCheckHandler := handlers.NewHealthCheckHandler(db)
 	api.GET("/admin/health-check", healthCheckHandler.Check)

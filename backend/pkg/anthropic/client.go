@@ -2,7 +2,9 @@ package anthropic
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +18,19 @@ const (
 )
 
 var httpClient = &http.Client{Timeout: 120 * time.Second}
+
+// ErrTransient wraps errors worth retrying (network failures, non-2xx
+// responses, token-limit truncation — a retry may yield a shorter,
+// non-truncated response due to model non-determinism).
+var ErrTransient = errors.New("anthropic: transient error")
+
+// ErrPermanent wraps errors that will deterministically reproduce on retry
+// with the same input (malformed/empty structured output) — retrying is a
+// waste of an attempt budget.
+var ErrPermanent = errors.New("anthropic: permanent error")
+
+// IsTransient reports whether err (or a wrapped error) is retry-worthy.
+func IsTransient(err error) bool { return errors.Is(err, ErrTransient) }
 
 // Client is a raw HTTP client for the Anthropic Messages API.
 // The API key is intentionally read from OPENAI_API_KEY (legacy naming — technical debt).
@@ -83,7 +98,11 @@ type GeneratedCardsOutput struct {
 // GenerateCards calls the Anthropic Messages API using forced tool use
 // (tool_choice: {type: "tool", name: "generate_flashcards"}) which guarantees
 // that Claude returns a JSON object matching the card schema.
-func (c *Client) GenerateCards(systemPrompt, userPrompt string) (*GeneratedCardsOutput, error) {
+//
+// Errors are wrapped with ErrTransient or ErrPermanent (see IsTransient) so
+// callers driving retries (e.g. a River job) know whether trying again is
+// worthwhile.
+func (c *Client) GenerateCards(ctx context.Context, systemPrompt, userPrompt string) (*GeneratedCardsOutput, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY não configurado (chave Anthropic)")
 	}
@@ -132,7 +151,7 @@ func (c *Client) GenerateCards(systemPrompt, userPrompt string) (*GeneratedCards
 		return nil, fmt.Errorf("serializar request: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, messagesURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, messagesURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -142,43 +161,51 @@ func (c *Client) GenerateCards(systemPrompt, userPrompt string) (*GeneratedCards
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("chamar Anthropic: %w", err)
+		return nil, transientErrf("chamar Anthropic: %v", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Anthropic HTTP %d: %s", resp.StatusCode, string(respBody))
+		return nil, transientErrf("Anthropic HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result anthropicResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("parsear resposta Anthropic: %w", err)
+		return nil, permanentErrf("parsear resposta Anthropic: %v", err)
 	}
 	if result.Error != nil {
-		return nil, fmt.Errorf("Anthropic API: %s", result.Error.Message)
+		return nil, transientErrf("Anthropic API: %s", result.Error.Message)
 	}
 
 	if result.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("resposta cortada pelo limite de tokens — reduza o número de cards ou o tamanho do documento")
+		return nil, transientErrf("resposta cortada pelo limite de tokens — reduza o número de cards ou o tamanho do documento")
 	}
 
 	for _, block := range result.Content {
 		if block.Type == "tool_use" && block.Name == "generate_flashcards" {
 			if len(block.Input) == 0 || string(block.Input) == "{}" || string(block.Input) == "null" {
-				return nil, fmt.Errorf("Claude não preencheu os cards (input vazio) — tente reduzir o número de cards solicitados")
+				return nil, permanentErrf("Claude não preencheu os cards (input vazio) — tente reduzir o número de cards solicitados")
 			}
 			var output GeneratedCardsOutput
 			if err := json.Unmarshal(block.Input, &output); err != nil {
-				return nil, fmt.Errorf("parsear cards: %w", err)
+				return nil, permanentErrf("parsear cards: %v", err)
 			}
 			if len(output.Cards) == 0 {
-				return nil, fmt.Errorf("Claude retornou lista de cards vazia — verifique o conteúdo fornecido")
+				return nil, permanentErrf("Claude retornou lista de cards vazia — verifique o conteúdo fornecido")
 			}
 			return &output, nil
 		}
 	}
 
-	return nil, fmt.Errorf("Anthropic não retornou cards estruturados (stop_reason: %s)", result.StopReason)
+	return nil, permanentErrf("Anthropic não retornou cards estruturados (stop_reason: %s)", result.StopReason)
+}
+
+func transientErrf(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrTransient, fmt.Sprintf(format, args...))
+}
+
+func permanentErrf(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrPermanent, fmt.Sprintf(format, args...))
 }

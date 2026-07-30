@@ -8,7 +8,6 @@ import (
 	"github.com/approva-cards/back-aprova-cards/internal/dto"
 	"github.com/approva-cards/back-aprova-cards/internal/models"
 	"github.com/approva-cards/back-aprova-cards/internal/repositories"
-	"github.com/approva-cards/back-aprova-cards/pkg/anthropic"
 )
 
 type CardUseCase interface {
@@ -17,23 +16,16 @@ type CardUseCase interface {
 	GetByProductID(productID string, disciplineID string, search string, page, pageSize int) (*dto.PaginatedResponse, error)
 	Update(id string, req *dto.UpdateCardRequest) (*dto.CardResponse, error)
 	Delete(id string) error
-	GenerateWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.GenerateCardsResponse, error)
-	PreviewWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.PreviewCardsResponse, error)
 	BatchSave(disciplineID string, req *dto.BatchSaveRequest) (*dto.BatchSaveResponse, error)
 }
 
 type cardUseCase struct {
-	repo            repositories.CardRepository
-	discRepo        repositories.DisciplineRepository
-	anthropicClient *anthropic.Client
+	repo     repositories.CardRepository
+	discRepo repositories.DisciplineRepository
 }
 
-func NewCardUseCase(repo repositories.CardRepository, discRepo repositories.DisciplineRepository, anthropicClient ...*anthropic.Client) CardUseCase {
-	uc := &cardUseCase{repo: repo, discRepo: discRepo}
-	if len(anthropicClient) > 0 {
-		uc.anthropicClient = anthropicClient[0]
-	}
-	return uc
+func NewCardUseCase(repo repositories.CardRepository, discRepo repositories.DisciplineRepository) CardUseCase {
+	return &cardUseCase{repo: repo, discRepo: discRepo}
 }
 
 func (uc *cardUseCase) Create(req *dto.CreateCardRequest, productID string) (*dto.CardResponse, error) {
@@ -116,86 +108,6 @@ func (uc *cardUseCase) Update(id string, req *dto.UpdateCardRequest) (*dto.CardR
 }
 
 func (uc *cardUseCase) Delete(id string) error { return uc.repo.Delete(id) }
-
-// GenerateWithAI generates cards via Anthropic and immediately persists them.
-// Kept for backward compatibility with the legacy /admin/disciplines/:id/generate-ai route.
-func (uc *cardUseCase) GenerateWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.GenerateCardsResponse, error) {
-	preview, err := uc.PreviewWithAI(disciplineID, req)
-	if err != nil {
-		return nil, err
-	}
-
-	disc, err := uc.discRepo.GetByID(disciplineID)
-	if err != nil {
-		return nil, errors.New("disciplina não encontrada")
-	}
-
-	var created []dto.CardResponse
-	for i, pc := range preview.Cards {
-		card := &models.Card{
-			DisciplineID: disciplineID,
-			ProductID:    disc.ProductID,
-			Front:        pc.Front,
-			Back:         pc.Back,
-			Order:        i,
-		}
-		if err := uc.repo.Create(card); err != nil {
-			continue
-		}
-		created = append(created, *cardToDTO(card))
-	}
-
-	return &dto.GenerateCardsResponse{Cards: created, Generated: len(created)}, nil
-}
-
-// PreviewWithAI generates cards via Anthropic using Structured Outputs and returns them
-// without persisting — the caller reviews and approves before calling BatchSave.
-func (uc *cardUseCase) PreviewWithAI(disciplineID string, req *dto.GenerateCardsRequest) (*dto.PreviewCardsResponse, error) {
-	if uc.anthropicClient == nil {
-		return nil, errors.New("geração com IA não configurada (defina OPENAI_API_KEY)")
-	}
-
-	disc, err := uc.discRepo.GetByID(disciplineID)
-	if err != nil {
-		return nil, errors.New("disciplina não encontrada")
-	}
-
-	limit := req.Limit
-	if limit <= 0 || limit > 50 {
-		limit = 20
-	}
-
-	system := buildSystemPrompt(req)
-	user := fmt.Sprintf(
-		"Disciplina: %s\nGere NO MÁXIMO %d flashcards com base no documento abaixo.\n\nDOCUMENTO:\n%s",
-		disc.Name, limit, req.Context,
-	)
-
-	output, err := uc.anthropicClient.GenerateCards(system, user)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao chamar Anthropic: %w", err)
-	}
-
-	cards := make([]dto.PreviewCard, 0, len(output.Cards))
-	for i, c := range output.Cards {
-		if strings.TrimSpace(c.Front) == "" || strings.TrimSpace(c.Back) == "" {
-			continue
-		}
-		tags := c.TopicTags
-		if tags == nil {
-			tags = []string{}
-		}
-		cards = append(cards, dto.PreviewCard{
-			ID:         fmt.Sprintf("%d", i+1),
-			Front:      c.Front,
-			Back:       c.Back,
-			TopicTags:  tags,
-			Difficulty: c.Difficulty,
-		})
-	}
-
-	return &dto.PreviewCardsResponse{Cards: cards, Generated: len(cards)}, nil
-}
 
 // BatchSave persists a list of human-approved cards to the database.
 func (uc *cardUseCase) BatchSave(disciplineID string, req *dto.BatchSaveRequest) (*dto.BatchSaveResponse, error) {

@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getSession } from '@/lib/auth';
 import { applyMentorTheme } from '@/lib/theme';
-import { RotateCcw, BookOpen, Zap, Play, ArrowLeft } from 'lucide-react';
+import { RotateCcw, BookOpen, Zap, Play, ArrowLeft, Repeat } from 'lucide-react';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
-type StudyMode = 'review' | 'new' | 'mixed';
+type StudyMode = 'review' | 'new' | 'mixed' | 'livre';
 
 const MODE_INFO: Record<StudyMode, { icon: React.ReactNode; label: string; message: string }> = {
   review: {
@@ -24,6 +24,11 @@ const MODE_INFO: Record<StudyMode, { icon: React.ReactNode; label: string; messa
     label: 'Revisão + Novos',
     message: 'Revisão + conteúdo novo — sessão completa!',
   },
+  livre: {
+    icon: <Repeat className="h-5 w-5" />,
+    label: 'Modo livre',
+    message: 'Estude qualquer card, mesmo já em dia — o cronograma se ajusta a partir de hoje.',
+  },
 };
 const DEFAULT_NEW_LIMIT = 50;
 
@@ -34,6 +39,7 @@ interface DisciplineStat {
   total_cards: number;
   reviews_due?: number;
   new_cards?: number;
+  next_review?: string;
 }
 
 const SessionConfig: React.FC = () => {
@@ -46,6 +52,7 @@ const SessionConfig: React.FC = () => {
   const [reviewsDue, setReviewsDue] = useState(0);
   const [newAvailable, setNewAvailable] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [nextReview, setNextReview] = useState<string | null>(null);
 
   const [mode, setMode] = useState<StudyMode>('mixed');
 
@@ -88,20 +95,29 @@ const SessionConfig: React.FC = () => {
       }
 
       let reviewsDueCount = 0;
+      let newCount = 0;
+      let totalCount = 0;
       if (isAll) {
         setDisciplineName('Todas as disciplinas');
         let total = 0;
         let due = 0;
         let fresh = 0;
+        let earliestNext: string | null = null;
         for (const d of disciplines) {
           total += Number(d.total_cards);
           due += Number(d.reviews_due || 0);
           fresh += Number(d.new_cards || 0);
+          if (d.next_review && (!earliestNext || d.next_review < earliestNext)) {
+            earliestNext = d.next_review;
+          }
         }
         setTotalCards(total);
         setReviewsDue(due);
         setNewAvailable(fresh);
+        setNextReview(earliestNext);
         reviewsDueCount = due;
+        newCount = fresh;
+        totalCount = total;
       } else {
         const disc = disciplines.find((d) => d.id === disciplineId);
         if (disc) {
@@ -109,13 +125,19 @@ const SessionConfig: React.FC = () => {
           setTotalCards(Number(disc.total_cards));
           setReviewsDue(Number(disc.reviews_due || 0));
           setNewAvailable(Number(disc.new_cards || 0));
+          setNextReview(disc.next_review || null);
           reviewsDueCount = Number(disc.reviews_due || 0);
+          newCount = Number(disc.new_cards || 0);
+          totalCount = Number(disc.total_cards);
         }
       }
 
-      // Com revisões pendentes, o modo padrão prioriza consolidação (mixed);
-      // sem pendências, começa direto nos cards novos
-      setMode(reviewsDueCount > 0 ? 'mixed' : 'new');
+      // Prioridade do modo padrão: revisões pendentes → cards novos →
+      // modo livre (tudo em dia, mas o aluno nunca fica sem opção de estudar)
+      if (reviewsDueCount > 0) setMode('mixed');
+      else if (newCount > 0) setMode('new');
+      else if (totalCount > 0) setMode('livre');
+      else setMode('new');
     } catch (err) {
       console.error('Error loading stats:', err);
       // Set defaults on error
@@ -133,11 +155,16 @@ const SessionConfig: React.FC = () => {
     return Math.min(DEFAULT_NEW_LIMIT, newAvailable);
   };
 
+  const getLivreCardCount = (): number => {
+    return Math.min(DEFAULT_NEW_LIMIT, totalCards);
+  };
+
   const getSessionCardCount = (): number => {
     switch (mode) {
       case 'review': return reviewsDue;
       case 'new': return getNewCardCount();
       case 'mixed': return reviewsDue + getNewCardCount();
+      case 'livre': return getLivreCardCount();
     }
   };
 
@@ -146,7 +173,12 @@ const SessionConfig: React.FC = () => {
       case 'review': return `Iniciar · ${reviewsDue} revisões`;
       case 'new': return `Iniciar · ${getNewCardCount()} novos`;
       case 'mixed': return `Iniciar · ${reviewsDue} rev. + ${getNewCardCount()} novos`;
+      case 'livre': return `Iniciar · ${getLivreCardCount()} cards (livre)`;
     }
+  };
+
+  const formatNextReview = (isoDate: string): string => {
+    return new Date(`${isoDate}T00:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   };
 
   const startSession = () => {
@@ -154,6 +186,9 @@ const SessionConfig: React.FC = () => {
     params.set('mode', mode);
     if (mode === 'new' || mode === 'mixed') {
       params.set('newLimit', String(getNewCardCount()));
+    }
+    if (mode === 'livre') {
+      params.set('newLimit', String(getLivreCardCount()));
     }
     params.set('t', String(Date.now()));
     navigate(`/aluno/estudo/${disciplineId}?${params.toString()}`);
@@ -196,6 +231,18 @@ const SessionConfig: React.FC = () => {
           </div>
         </div>
 
+        {/* Estado "tudo em dia" — antes era um beco sem saída com tudo zerado */}
+        {totalCards > 0 && reviewsDue === 0 && newAvailable === 0 && (
+          <div className="mb-6 rounded-2xl border border-primary/30 bg-primary/10 p-4 text-center">
+            <p className="font-display text-sm font-semibold text-foreground">🎉 Você está em dia!</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Todos os cards desta seleção já foram estudados
+              {nextReview ? ` — a próxima revisão vence em ${formatNextReview(nextReview)}` : ''}.
+              Quer reforçar antes disso? Use o modo livre abaixo.
+            </p>
+          </div>
+        )}
+
         {/* Mode selection */}
         <h2 className="mb-3 font-display text-base font-semibold text-foreground">Como você quer estudar hoje?</h2>
         <div className="mb-8 space-y-2">
@@ -203,6 +250,7 @@ const SessionConfig: React.FC = () => {
             { key: 'review' as StudyMode, count: reviewsDue, disabled: reviewsDue === 0 },
             { key: 'new' as StudyMode, count: newAvailable, disabled: newAvailable === 0 },
             { key: 'mixed' as StudyMode, count: reviewsDue + getNewCardCount(), disabled: reviewsDue === 0 && newAvailable === 0 },
+            { key: 'livre' as StudyMode, count: totalCards, disabled: totalCards === 0 },
           ]).map(({ key, count, disabled }) => {
             const info = MODE_INFO[key];
             const isSelected = mode === key;

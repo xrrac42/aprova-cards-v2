@@ -18,10 +18,10 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
 import { X, RefreshCw } from "lucide-react";
 import FeedbackPopup from "@/components/FeedbackPopup";
 
-type StudyMode = "review" | "new" | "mixed";
+type StudyMode = "review" | "new" | "mixed" | "livre";
 
 function normalizeStudyMode(mode: string | null): StudyMode {
-  return mode === "review" || mode === "new" || mode === "mixed"
+  return mode === "review" || mode === "new" || mode === "mixed" || mode === "livre"
     ? mode
     : "mixed";
 }

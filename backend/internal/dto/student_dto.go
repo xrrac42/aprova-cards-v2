@@ -23,6 +23,7 @@ type StudentDisciplineStat struct {
 	TotalCards int    `json:"total_cards"`
 	ReviewsDue int    `json:"reviews_due"`
 	NewCards   int    `json:"new_cards"`
+	NextReview string `json:"next_review,omitempty"`
 }
 
 type StudentHomeResponse struct {

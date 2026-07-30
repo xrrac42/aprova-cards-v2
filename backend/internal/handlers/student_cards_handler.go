@@ -11,6 +11,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// brDateSQL é a data "de hoje" no fuso do Brasil, calculada no banco.
+// CURRENT_DATE puro usa UTC: entre ~21h e meia-noite (horário de Brasília)
+// o servidor já está no dia seguinte, e as revisões venceriam/atrasariam
+// com horas de diferença em relação ao relógio do aluno.
+const brDateSQL = "(now() AT TIME ZONE 'America/Sao_Paulo')::date"
+
 type StudentCardsHandler struct {
 	cardRepo       repositories.CardRepository
 	discRepo       repositories.DisciplineRepository
@@ -78,7 +84,7 @@ func (h *StudentCardsHandler) GetStudentHome(c *gin.Context) {
 		Select("cards.discipline_id, count(*) as count").
 		Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", studentEmail).
 		Where("cards.product_id = ?", productID).
-		Where("sp.next_review <= CURRENT_DATE").
+		Where("sp.next_review <= "+brDateSQL).
 		Group("cards.discipline_id").
 		Scan(&dueCounts)
 	dueMap := make(map[string]int, len(dueCounts))
@@ -97,6 +103,24 @@ func (h *StudentCardsHandler) GetStudentHome(c *gin.Context) {
 	studiedMap := make(map[string]int, len(studiedCounts))
 	for _, r := range studiedCounts {
 		studiedMap[r.DisciplineID] = r.Count
+	}
+
+	// Próxima revisão futura por disciplina (para a UI explicar o estado "tudo em dia")
+	type nextRow struct {
+		DisciplineID string
+		Next         string
+	}
+	var nextRows []nextRow
+	h.db.Model(&models.Card{}).
+		Select("cards.discipline_id, MIN(sp.next_review)::text as next").
+		Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", studentEmail).
+		Where("cards.product_id = ?", productID).
+		Where("sp.next_review > "+brDateSQL).
+		Group("cards.discipline_id").
+		Scan(&nextRows)
+	nextMap := make(map[string]string, len(nextRows))
+	for _, r := range nextRows {
+		nextMap[r.DisciplineID] = r.Next
 	}
 
 	totalCards := 0
@@ -120,6 +144,7 @@ func (h *StudentCardsHandler) GetStudentHome(c *gin.Context) {
 			TotalCards: cnt,
 			ReviewsDue: due,
 			NewCards:   newCards,
+			NextReview: nextMap[d.ID],
 		})
 	}
 
@@ -222,7 +247,7 @@ func (h *StudentCardsHandler) GetStudyCards(c *gin.Context) {
 	email := studentEmail.(string)
 	productID := c.Query("product_id")
 	disciplineID := c.Query("discipline_id")
-	studyMode := c.DefaultQuery("mode", "mixed") // new, review, mixed (all = alias de mixed)
+	studyMode := c.DefaultQuery("mode", "mixed") // new, review, mixed (all = alias), livre/cram = ignora cronograma
 	newLimit := 0
 	if limit := c.Query("new_limit"); limit != "" {
 		fmt.Sscanf(limit, "%d", &newLimit)
@@ -341,15 +366,28 @@ func (h *StudentCardsHandler) getStudyCardsForStudent(email, productID, discipli
 
 	needReview := studyMode == "review" || studyMode == "mixed" || studyMode == "all"
 	needNew := studyMode == "new" || studyMode == "mixed" || studyMode == "all"
+	isCram := studyMode == "livre" || studyMode == "cram"
 
 	var cards []models.Card
+
+	// Modo livre: todos os cards da disciplina, ignorando o cronograma de revisão.
+	// Válvula de escape para quem terminou tudo e quer estudar mesmo assim.
+	if isCram {
+		q := baseQuery().Order("random()")
+		if newLimit > 0 {
+			q = q.Limit(newLimit)
+		}
+		if err := q.Find(&cards).Error; err != nil {
+			return nil, err
+		}
+	}
 
 	// Revisões vencidas: cards que o aluno já viu e cujo next_review chegou
 	if needReview {
 		var reviewCards []models.Card
 		if err := baseQuery().
 			Joins("JOIN student_progress sp ON sp.card_id = cards.id AND sp.student_email = ?", email).
-			Where("sp.next_review <= CURRENT_DATE").
+			Where("sp.next_review <= "+brDateSQL).
 			Order("random()").
 			Find(&reviewCards).Error; err != nil {
 			return nil, err

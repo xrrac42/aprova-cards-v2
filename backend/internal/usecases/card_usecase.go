@@ -164,9 +164,11 @@ func buildSystemPrompt(req *dto.GenerateCardsRequest) string {
 	}
 
 	system := fmt.Sprintf(
-		"Você é um especialista em criação de flashcards para concursos públicos brasileiros.\n"+
-			"Crie flashcards concisos e precisos em português (pt-BR), baseados EXCLUSIVAMENTE no conteúdo fornecido.\n\n"+
-			"Arquétipo: %s\nEstilo de banca: %s",
+		"Você é um especialista em criação de flashcards para concursos públicos brasileiros, com foco principal em legislação, artigos, incisos, parágrafos, alíneas, prazos, exceções e sanções.\n"+
+		"Crie flashcards concisos e precisos em português (pt-BR), baseados EXCLUSIVAMENTE no conteúdo fornecido, explorando ao máximo os pontos normativos relevantes sem extrapolar o texto.\n"+
+		"Priorize uma cobertura ampla e granular do documento: prefira um único comando legal por card, destaque exceções e condições, e evite cards genéricos ou redundantes.\n\n"+
+		"Arquétipo: %s\nEstilo de banca: %s\n"+
+		"Quando o arquétipo for Preencher Lacuna, transforme o núcleo do dispositivo legal em lacunas estratégicas, preservando o contexto jurídico e evitando lacunas óbvias demais.",
 		archDesc, preDesc,
 	)
 

@@ -17,7 +17,9 @@ const (
 	anthropicVersion = "2023-06-01"
 )
 
-var httpClient = &http.Client{Timeout: 120 * time.Second}
+// httpClient's timeout must outlast a full 8192-token response (~2-2.5 min
+// at Sonnet's output speed); the River job timeout (pkg/jobs) sits above it.
+var httpClient = &http.Client{Timeout: 200 * time.Second}
 
 // ErrTransient wraps errors worth retrying (network failures, non-2xx
 // responses, token-limit truncation — a retry may yield a shorter,
@@ -42,9 +44,22 @@ func NewClient(apiKey string) *Client {
 	return &Client{apiKey: apiKey}
 }
 
+type cacheControl struct {
+	Type string `json:"type"`
+}
+
+// textBlock is a user-turn content block. Splitting the turn into blocks lets
+// the large, stable part (the source text) carry a cache breakpoint while the
+// instructions after it vary between calls.
+type textBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content []textBlock `json:"content"`
 }
 
 type toolDefinition struct {
@@ -88,6 +103,10 @@ type GeneratedCard struct {
 	Back       string   `json:"back"`
 	TopicTags  []string `json:"topic_tags"`
 	Difficulty string   `json:"difficulty"` // easy | medium | hard
+	// Dispositivo is the legal unit the card tests ("Art. 5, III"), copied
+	// from the checklist in the prompt; empty for non-legal text. Used only
+	// for the coverage check — see pkg/legal.
+	Dispositivo string `json:"dispositivo"`
 }
 
 // GeneratedCardsOutput is the structured output parsed from Claude's tool call input.
@@ -95,19 +114,22 @@ type GeneratedCardsOutput struct {
 	Cards []GeneratedCard `json:"cards"`
 }
 
-// GenerateCards calls the Anthropic Messages API using forced tool use
-// (tool_choice: {type: "tool", name: "generate_flashcards"}) which guarantees
-// that Claude returns a JSON object matching the card schema.
-//
-// Errors are wrapped with ErrTransient or ErrPermanent (see IsTransient) so
-// callers driving retries (e.g. a River job) know whether trying again is
-// worthwhile.
-func (c *Client) GenerateCards(ctx context.Context, systemPrompt, userPrompt string) (*GeneratedCardsOutput, error) {
-	if c.apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY não configurado (chave Anthropic)")
-	}
+// CardRequest is one card-generation call. Document is sent first, with a
+// cache breakpoint, so a follow-up call over the same Document (the coverage
+// pass) re-reads it from cache instead of reprocessing it.
+type CardRequest struct {
+	System       string
+	Document     string
+	Instructions string
+	// AllowEmpty makes an empty card list a valid answer instead of a
+	// permanent error — the follow-up pass may legitimately find nothing.
+	AllowEmpty bool
+}
 
-	inputSchema := map[string]any{
+var cardsTool = toolDefinition{
+	Name:        "generate_flashcards",
+	Description: "Retorna os flashcards gerados em formato estruturado",
+	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"cards": map[string]any{
@@ -115,6 +137,10 @@ func (c *Client) GenerateCards(ctx context.Context, systemPrompt, userPrompt str
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
+						"dispositivo": map[string]any{
+							"type":        "string",
+							"description": "ID exato do dispositivo da lista fornecida que este card cobre (ex.: \"Art. 5, III\"); string vazia se não houver lista",
+						},
 						"front": map[string]any{"type": "string"},
 						"back":  map[string]any{"type": "string"},
 						"topic_tags": map[string]any{
@@ -126,24 +152,89 @@ func (c *Client) GenerateCards(ctx context.Context, systemPrompt, userPrompt str
 							"enum": []string{"easy", "medium", "hard"},
 						},
 					},
-					"required": []string{"front", "back", "topic_tags", "difficulty"},
+					"required": []string{"dispositivo", "front", "back", "topic_tags", "difficulty"},
 				},
 			},
 		},
 		"required": []string{"cards"},
+	},
+}
+
+var removeTool = toolDefinition{
+	Name:        "select_cards_to_remove",
+	Description: "Retorna os números dos flashcards que devem ser removidos da lista",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"remove": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "integer"},
+				"description": "Números (1-based) dos cards a remover; lista vazia se nenhum",
+			},
+		},
+		"required": []string{"remove"},
+	},
+}
+
+// GenerateCards calls the Anthropic Messages API using forced tool use
+// (tool_choice: {type: "tool", name: "generate_flashcards"}) which guarantees
+// that Claude returns a JSON object matching the card schema.
+//
+// Errors are wrapped with ErrTransient or ErrPermanent (see IsTransient) so
+// callers driving retries (e.g. a River job) know whether trying again is
+// worthwhile.
+func (c *Client) GenerateCards(ctx context.Context, req CardRequest) (*GeneratedCardsOutput, error) {
+	content := []textBlock{
+		{Type: "text", Text: req.Document, CacheControl: &cacheControl{Type: "ephemeral"}},
+		{Type: "text", Text: req.Instructions},
+	}
+	input, err := c.callTool(ctx, req.System, content, cardsTool, 8192)
+	if err != nil {
+		return nil, err
+	}
+
+	var output GeneratedCardsOutput
+	if err := json.Unmarshal(input, &output); err != nil {
+		return nil, permanentErrf("parsear cards: %v", err)
+	}
+	if len(output.Cards) == 0 && !req.AllowEmpty {
+		return nil, permanentErrf("Claude retornou lista de cards vazia — verifique o conteúdo fornecido")
+	}
+	return &output, nil
+}
+
+// SelectCardsToRemove asks for the 1-based indices of cards to drop instead
+// of the curated list itself: the output stays a few dozen tokens no matter
+// how many cards are reviewed, so the review pass no longer costs as much
+// time as generating every card again.
+func (c *Client) SelectCardsToRemove(ctx context.Context, systemPrompt, userPrompt string) ([]int, error) {
+	input, err := c.callTool(ctx, systemPrompt, []textBlock{{Type: "text", Text: userPrompt}}, removeTool, 1024)
+	if err != nil {
+		return nil, err
+	}
+	var output struct {
+		Remove []int `json:"remove"`
+	}
+	if err := json.Unmarshal(input, &output); err != nil {
+		return nil, permanentErrf("parsear revisão: %v", err)
+	}
+	return output.Remove, nil
+}
+
+// callTool sends one request forcing a call to tool and returns that call's
+// raw input.
+func (c *Client) callTool(ctx context.Context, systemPrompt string, content []textBlock, tool toolDefinition, maxTokens int) (json.RawMessage, error) {
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("OPENAI_API_KEY não configurado (chave Anthropic)")
 	}
 
 	payload := anthropicRequest{
-		Model:     defaultModel,
-		MaxTokens: 8192,
-		System:    systemPrompt,
-		Messages:  []anthropicMessage{{Role: "user", Content: userPrompt}},
-		Tools: []toolDefinition{{
-			Name:        "generate_flashcards",
-			Description: "Retorna os flashcards gerados em formato estruturado",
-			InputSchema: inputSchema,
-		}},
-		ToolChoice: toolChoice{Type: "tool", Name: "generate_flashcards"},
+		Model:      defaultModel,
+		MaxTokens:  maxTokens,
+		System:     systemPrompt,
+		Messages:   []anthropicMessage{{Role: "user", Content: content}},
+		Tools:      []toolDefinition{tool},
+		ToolChoice: toolChoice{Type: "tool", Name: tool.Name},
 	}
 
 	body, err := json.Marshal(payload)
@@ -184,22 +275,15 @@ func (c *Client) GenerateCards(ctx context.Context, systemPrompt, userPrompt str
 	}
 
 	for _, block := range result.Content {
-		if block.Type == "tool_use" && block.Name == "generate_flashcards" {
-			if len(block.Input) == 0 || string(block.Input) == "{}" || string(block.Input) == "null" {
-				return nil, permanentErrf("Claude não preencheu os cards (input vazio) — tente reduzir o número de cards solicitados")
+		if block.Type == "tool_use" && block.Name == tool.Name {
+			if len(block.Input) == 0 || string(block.Input) == "null" {
+				return nil, permanentErrf("Claude não preencheu a resposta estruturada (input vazio)")
 			}
-			var output GeneratedCardsOutput
-			if err := json.Unmarshal(block.Input, &output); err != nil {
-				return nil, permanentErrf("parsear cards: %v", err)
-			}
-			if len(output.Cards) == 0 {
-				return nil, permanentErrf("Claude retornou lista de cards vazia — verifique o conteúdo fornecido")
-			}
-			return &output, nil
+			return block.Input, nil
 		}
 	}
 
-	return nil, permanentErrf("Anthropic não retornou cards estruturados (stop_reason: %s)", result.StopReason)
+	return nil, permanentErrf("Anthropic não retornou resposta estruturada (stop_reason: %s)", result.StopReason)
 }
 
 func transientErrf(format string, args ...any) error {

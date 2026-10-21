@@ -116,3 +116,25 @@ func TestSplit_NeverSplitsMidRune(t *testing.T) {
 		}
 	}
 }
+
+func TestSplit_PrefersArticleHeadingWithoutOverlap(t *testing.T) {
+	art := func(n string) string { return "Art. " + n + " " + strings.Repeat("texto da norma. ", 120) }
+	// A page marker and a lowercase cross-reference sit near the cut; the
+	// capitalised heading must still win, and no overlap may follow it.
+	text := art("1º") + PageMarker + " 1]] nos termos do art. 37 " + art("2º") + art("3º")
+
+	opts := SplitOptions{TargetChars: len(art("1º")) + 300, OverlapChars: 100, MaxChunks: 10}
+	chunks, err := Split(text, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	if !strings.HasPrefix(chunks[1].Text, "Art. 2º") {
+		t.Errorf("second chunk should start at the Art. 2º heading, got %q", chunks[1].Text[:30])
+	}
+	if chunks[1].CharStart != chunks[0].CharEnd {
+		t.Errorf("article cut should not overlap: chunk0 end=%d, chunk1 start=%d", chunks[0].CharEnd, chunks[1].CharStart)
+	}
+}

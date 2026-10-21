@@ -80,7 +80,9 @@ func setupGeneration(cfg *config.Config, db *gorm.DB) (*river.Client[pgx.Tx], us
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Workers: workers,
 		Queues: map[string]river.QueueConfig{
-			jobs.QueueChunks: {MaxWorkers: 6},
+			// Chunks are small (pkg/chunker) so a job fans out wide; the
+			// ceiling here is the Anthropic org's rate limit, not the server.
+			jobs.QueueChunks: {MaxWorkers: 12},
 			jobs.QueueReduce: {MaxWorkers: 2},
 		},
 	})

@@ -167,12 +167,12 @@ const AiGenerationPanel: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Guidelines
-  const [archetype, setArchetype]     = useState<Archetype>('qa');
+  const [archetype, setArchetype]     = useState<Archetype>('cloze');
   const [preset, setPreset]           = useState('default');
   const [regraDeOuro, setRegraDeOuro] = useState('');
 
   // Generation / Modal
-  const [limit, setLimit]               = useState(30);
+  const [limit, setLimit]               = useState(0);
   const [modalState, setModalState]     = useState<ModalState>('closed');
   const [editedCards, setEditedCards]   = useState<GeneratedCard[]>([]);
   const [saving, setSaving]             = useState(false);
@@ -242,7 +242,7 @@ const AiGenerationPanel: React.FC = () => {
           const content = await page.getTextContent();
           // Page marker gives the backend chunker (pkg/chunker) a real
           // page-aligned cut point when splitting large documents.
-          text += content.items.map((item: { str: string }) => item.str).join(' ') + `\n\n[[PAGE ${i}]]\n\n`;
+          text += content.items.map(item => 'str' in item ? item.str : '').join(' ') + `\n\n[[PAGE ${i}]]\n\n`;
         }
         setAiDocText(text.trim());
       } finally {
@@ -486,7 +486,7 @@ const AiGenerationPanel: React.FC = () => {
           <section className="space-y-4 px-6 py-5">
             <SectionHeader
               step={3}
-              title="Diretrizes Didáticas"
+              title="Diretrizes para Legislação"
               right={
                 <div className="relative">
                   <select
@@ -494,15 +494,19 @@ const AiGenerationPanel: React.FC = () => {
                     onChange={e => setPreset(e.target.value)}
                     className="appearance-none rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pl-3 pr-7 text-xs text-zinc-400 outline-none transition-colors focus:border-violet-500"
                   >
-                    <option value="default">Configuração Padrão</option>
-                    <option value="cespe">Estilo CESPE</option>
-                    <option value="oab">OAB Jurisprudência</option>
-                    <option value="magistratura">Magistratura Denso</option>
+                    <option value="default">Base legislativa</option>
+                    <option value="cespe">CESPE / CEBRASPE</option>
+                    <option value="oab">OAB / Jurisprudência</option>
+                    <option value="magistratura">Magistratura / denso</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-600" />
                 </div>
               }
             />
+
+              <p className="text-xs leading-relaxed text-zinc-500">
+                Para documentos legais, o modo <span className="text-zinc-300">Preencher Lacuna</span> ajuda a transformar artigos, incisos, prazos e exceções em cards mais fortes para memorização e revisão.
+              </p>
 
             {/* Archetype cards */}
             <div className="grid grid-cols-3 gap-2.5">
@@ -556,15 +560,16 @@ const AiGenerationPanel: React.FC = () => {
         {/* ── Footer ──────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between border-t border-zinc-800 bg-[#0a0a0c] px-6 py-4">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-zinc-500 whitespace-nowrap">Limite de cards</span>
+            <span className="text-xs font-medium text-zinc-500 whitespace-nowrap">Teto máximo de cards</span>
             <input
               type="number"
-              min={1}
-              max={100}
+              min={0}
+              max={150}
               value={limit}
-              onChange={e => setLimit(Math.max(1, Math.min(100, Number(e.target.value))))}
+              onChange={e => setLimit(Math.max(0, Math.min(150, Number(e.target.value))))}
               className="w-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-center text-sm text-zinc-100 outline-none transition-colors focus:border-violet-500"
             />
+            <span className="text-[11px] text-zinc-500">0 = automático pela densidade jurídica</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -606,9 +611,7 @@ const AiGenerationPanel: React.FC = () => {
           />
 
           {/* Modal card */}
-          <div className={`relative z-10 w-full max-w-2xl rounded-2xl border border-zinc-800 bg-[#121214] shadow-2xl transition-all duration-300 ${
-            modalState !== 'closed' ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
-          }`}>
+          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-zinc-800 bg-[#121214] shadow-2xl scale-100 opacity-100 transition-all duration-300">
 
             {/* ── Loading state ── */}
             {modalState === 'loading' && (

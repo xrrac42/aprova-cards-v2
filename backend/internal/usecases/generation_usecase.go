@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/approva-cards/back-aprova-cards/pkg/anthropic"
 	"github.com/approva-cards/back-aprova-cards/pkg/chunker"
 	"github.com/approva-cards/back-aprova-cards/pkg/dedupe"
+	"github.com/approva-cards/back-aprova-cards/pkg/legal"
 	"gorm.io/datatypes"
 )
 
@@ -33,8 +35,28 @@ const (
 	sampleLimit = 1
 
 	// maxCardsForReviewer bounds the reviewer LLM call's input size; above
-	// this the deduplicated (unreviewed) set is used directly.
-	maxCardsForReviewer = 150
+	// this the deduplicated (unreviewed) set is used directly. The reviewer
+	// answers with indices only, so its latency barely grows with the list.
+	maxCardsForReviewer = 250
+
+	// maxReviewRemovalRatio rejects a review that would drop more than this
+	// share of the cards — far more likely a misread list than real curation.
+	maxReviewRemovalRatio = 0.5
+
+	// maxChecklistItems bounds the dispositivos listed in the first-pass
+	// prompt so that pass fits in max_tokens; anything beyond it is still
+	// checked for coverage and goes to the follow-up pass.
+	maxChecklistItems = 35
+
+	// Anti-laziness follow-up (see planComplement). It runs at most once per
+	// chunk, only when the first pass left a measurable gap, and reuses the
+	// cached chunk text — so its cost is paid only where it adds cards.
+	minUncoveredForComplement = 2
+	maxComplementCards        = 25
+	// underGenerationRatio: for non-legal text (no dispositivos to check),
+	// a first pass below this share of the chunk's estimated potential is
+	// treated as under-generation.
+	underGenerationRatio = 0.6
 )
 
 // JobEnqueuer decouples the usecase layer from River's generic client types.
@@ -204,9 +226,8 @@ func (uc *generationUseCase) ProcessChunk(ctx context.Context, jobID, chunkID st
 		Preset:      job.Preset,
 		RegraDeOuro: job.RegraDeOuro,
 	})
-	user := buildChunkUserPrompt(disc.Name, chunk.ChunkText, chunk.ChunkIndex+1, job.TotalChunks, chunk.CardLimit)
 
-	output, genErr := uc.ai.GenerateCards(ctx, system, user)
+	cards, genErr := uc.generateChunkCards(ctx, system, disc.Name, chunk, job.TotalChunks)
 
 	terminal := true
 	if genErr != nil {
@@ -215,7 +236,7 @@ func (uc *generationUseCase) ProcessChunk(ctx context.Context, jobID, chunkID st
 			terminal = false // let River retry — don't count this chunk as done yet
 		}
 	} else {
-		cardsJSON, marshalErr := json.Marshal(output.Cards)
+		cardsJSON, marshalErr := json.Marshal(cards)
 		if marshalErr != nil {
 			_ = uc.chunkRepo.MarkFailed(chunkID, marshalErr.Error(), attempt)
 		} else {
@@ -280,17 +301,19 @@ func (uc *generationUseCase) RunReduce(ctx context.Context, jobID string) error 
 
 	final := deduped
 	reviewErr := ""
-	if len(deduped) > 0 && len(deduped) <= maxCardsForReviewer {
+	if len(deduped) > 1 && len(deduped) <= maxCardsForReviewer {
 		if err := uc.jobRepo.UpdateStatus(jobID, models.GenerationJobStatusReviewing); err != nil {
 			return err
 		}
 		system, user := buildReviewerPrompt(disc.Name, deduped)
-		reviewed, err := uc.ai.GenerateCards(ctx, system, user)
+		remove, err := uc.ai.SelectCardsToRemove(ctx, system, user)
 		if err != nil {
 			reviewErr = err.Error()
-		} else if len(reviewed.Cards) > 0 {
-			final = reviewed.Cards
+		} else {
+			final, reviewErr = applyRemovals(deduped, remove)
 		}
+	} else if len(deduped) > maxCardsForReviewer {
+		reviewErr = "revisão final omitida para reduzir latência; conjunto deduplicado entregue diretamente"
 	}
 
 	previewCards := make([]dto.PreviewCard, 0, len(final))
@@ -328,13 +351,7 @@ func proportionalCardLimits(chunks []chunker.Chunk, requestedTotal int) []int {
 	natural := make([]int, len(chunks))
 	naturalSum := 0
 	for i, c := range chunks {
-		n := len(c.Text) / charsPerCard
-		if n < minCardsPerChunk {
-			n = minCardsPerChunk
-		}
-		if n > maxCardsPerChunk {
-			n = maxCardsPerChunk
-		}
+		n := naturalCardLimit(c.Text)
 		natural[i] = n
 		naturalSum += n
 	}
@@ -359,26 +376,251 @@ func proportionalCardLimits(chunks []chunker.Chunk, requestedTotal int) []int {
 	return scaled
 }
 
-func buildChunkUserPrompt(discName, chunkText string, chunkIndex, totalChunks, limit int) string {
-	return fmt.Sprintf(
-		"Disciplina: %s\nEste texto é a parte %d de %d de um documento maior — use SOMENTE o conteúdo abaixo, não faça referência a outras partes do documento.\n"+
-			"Gere NO MÁXIMO %d flashcards com base neste trecho.\n\nTRECHO:\n%s",
-		discName, chunkIndex, totalChunks, limit, chunkText,
-	)
+// naturalCardLimit is a chunk's estimated card potential: the larger of a
+// density heuristic and its count of dispositivos (each deserves at least one
+// card), clamped to what one call can write. It is deterministic in the text,
+// so ProcessChunk can recompute it to tell whether the stored CardLimit was
+// scaled down by a user-set ceiling.
+func naturalCardLimit(text string) int {
+	n := int(math.Round(float64(len(text)) / float64(charsPerCard) * legalDensityFactor(text)))
+	if d := len(legal.Extract(text)); d > n {
+		n = d
+	}
+	if n < minCardsPerChunk {
+		n = minCardsPerChunk
+	}
+	if n > maxCardsPerChunk {
+		n = maxCardsPerChunk
+	}
+	return n
+}
+
+func legalDensityFactor(text string) float64 {
+	lower := strings.ToLower(text)
+	score := 0.0
+
+	markers := []struct {
+		needle string
+		weight float64
+	}{
+		{needle: "art.", weight: 1.2},
+		{needle: "artigo", weight: 1.0},
+		{needle: "§", weight: 0.9},
+		{needle: "parágrafo", weight: 0.8},
+		{needle: "paragrafo", weight: 0.8},
+		{needle: "inciso", weight: 0.7},
+		{needle: "alínea", weight: 0.7},
+		{needle: "alinea", weight: 0.7},
+		{needle: "caput", weight: 0.5},
+		{needle: "prazo", weight: 0.9},
+		{needle: "vedado", weight: 0.8},
+		{needle: "proib", weight: 0.8},
+		{needle: "deverá", weight: 0.6},
+		{needle: "devera", weight: 0.6},
+		{needle: "sanção", weight: 0.9},
+		{needle: "sancao", weight: 0.9},
+		{needle: "compet", weight: 0.5},
+		{needle: "hipótese", weight: 0.6},
+		{needle: "hipotese", weight: 0.6},
+		{needle: "dias", weight: 0.2},
+		{needle: "meses", weight: 0.2},
+		{needle: "anos", weight: 0.2},
+	}
+
+	for _, marker := range markers {
+		if count := strings.Count(lower, marker.needle); count > 0 {
+			score += float64(count) * marker.weight
+		}
+	}
+
+	bonus := 1.0 + math.Min(1.2, score/10.0)
+	return bonus
+}
+
+// generateChunkCards runs the first generation pass over a chunk and, when
+// it under-delivered, one follow-up pass aimed at exactly what is missing.
+// This is the middle ground between paying for long model reasoning on every
+// chunk and accepting whatever a lazy first pass returns: Go measures the
+// gap deterministically (pkg/legal), and the model spends a second call only
+// where there is something left to cover. The follow-up is best-effort — its
+// failure keeps the first pass's cards instead of failing the chunk.
+func (uc *generationUseCase) generateChunkCards(ctx context.Context, system, discName string, chunk *models.GenerationChunk, totalChunks int) ([]anthropic.GeneratedCard, error) {
+	dispositivos := legal.Extract(chunk.ChunkText)
+	ceiling := chunk.CardLimit < naturalCardLimit(chunk.ChunkText)
+	// The document block must be byte-identical across both passes for the
+	// follow-up to hit the prompt cache.
+	document := "TRECHO:\n" + chunk.ChunkText
+
+	checklist := dispositivos
+	if len(checklist) > maxChecklistItems {
+		checklist = checklist[:maxChecklistItems]
+	}
+	first, err := uc.ai.GenerateCards(ctx, anthropic.CardRequest{
+		System:       system,
+		Document:     document,
+		Instructions: buildChunkInstructions(discName, chunk.ChunkIndex+1, totalChunks, chunk.CardLimit, ceiling, checklist),
+	})
+	if err != nil {
+		return nil, err
+	}
+	cards := first.Cards
+
+	plan := planComplement(cards, dispositivos, chunk.CardLimit, ceiling)
+	if !plan.needed {
+		return cards, nil
+	}
+
+	more, err := uc.ai.GenerateCards(ctx, anthropic.CardRequest{
+		System:       system,
+		Document:     document,
+		Instructions: buildComplementInstructions(discName, cards, plan, chunk.CardLimit),
+		AllowEmpty:   true,
+	})
+	if err != nil {
+		log.Printf("generation: chunk %s: passada complementar falhou, mantendo %d cards da primeira: %v", chunk.ID, len(cards), err)
+		return cards, nil
+	}
+	extra := more.Cards
+	if len(extra) > plan.budget {
+		extra = extra[:plan.budget]
+	}
+	log.Printf("generation: chunk %s: complemento adicionou %d cards (lacunas: %d dispositivos)", chunk.ID, len(extra), len(plan.missing))
+	return append(cards, extra...), nil
+}
+
+type complementPlan struct {
+	needed bool
+	// missing lists uncovered dispositivos; empty for non-legal text, where
+	// the follow-up is driven by card count instead.
+	missing []string
+	budget  int
+}
+
+// planComplement decides whether a first pass was lazy. With dispositivos,
+// "lazy" means at least minUncoveredForComplement of them got no card; without
+// them, it means fewer cards than underGenerationRatio of the chunk's
+// potential. A user-set ceiling caps the follow-up at the room left under it.
+func planComplement(cards []anthropic.GeneratedCard, dispositivos []string, limit int, ceiling bool) complementPlan {
+	room := maxComplementCards
+	if ceiling {
+		room = limit - len(cards)
+	}
+	if room <= 0 {
+		return complementPlan{}
+	}
+
+	if len(dispositivos) > 0 {
+		cited := make([]string, len(cards))
+		for i, c := range cards {
+			cited[i] = c.Dispositivo
+		}
+		missing := legal.Uncovered(dispositivos, cited)
+		if len(missing) < minUncoveredForComplement {
+			return complementPlan{}
+		}
+		// Up to two cards per gap (rule + exception/prazo), within room.
+		budget := 2 * len(missing)
+		if budget > room {
+			budget = room
+		}
+		return complementPlan{needed: true, missing: missing, budget: budget}
+	}
+
+	if float64(len(cards)) >= underGenerationRatio*float64(limit) {
+		return complementPlan{}
+	}
+	budget := limit - len(cards)
+	if budget > room {
+		budget = room
+	}
+	return complementPlan{needed: budget > 0, budget: budget}
+}
+
+func buildChunkInstructions(discName string, chunkIndex, totalChunks, limit int, ceiling bool, checklist []string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Disciplina: %s\nO TRECHO acima é a parte %d de %d de um documento maior — use SOMENTE esse conteúdo, sem referência a outras partes do documento.\n\n", discName, chunkIndex, totalChunks)
+
+	if len(checklist) > 0 {
+		sb.WriteString("Dispositivos identificados no trecho:\n")
+		sb.WriteString(legal.FormatChecklist(checklist))
+		sb.WriteString("\nCubra TODOS os dispositivos da lista: cada um deve ter pelo menos um card, e o campo \"dispositivo\" de cada card deve trazer exatamente o ID da lista que ele cobre. " +
+			"Dispositivos com prazo, exceção, vedação, condição, competência ou sanção costumam render mais de um card — um por regra cobrável em prova. " +
+			"Se um item for mera remissão ou não tiver conteúdo cobrável, pode omiti-lo.\n")
+	} else {
+		sb.WriteString("Identifique os tópicos centrais do trecho — artigos, incisos, parágrafos, alíneas, prazos, hipóteses, exceções, sanções, competências e definições — e cubra o máximo de tópicos distintos com qualidade. Deixe o campo \"dispositivo\" vazio.\n")
+	}
+
+	sb.WriteString("Prefira cards de alta utilidade prática: uma pergunta por comando legal, uma lacuna por regra relevante e uma explicação por exceção importante. Evite repetição literal e trechos pouco informativos.\n")
+	if ceiling {
+		fmt.Fprintf(&sb, "Gere NO MÁXIMO %d flashcards; se não couber tudo, priorize as regras mais cobradas.", limit)
+	} else {
+		fmt.Fprintf(&sb, "Referência de volume: cerca de %d flashcards. É uma estimativa, não um teto — se o trecho tiver mais regras cobráveis, gere mais; se tiver menos, não crie cards de enchimento.", limit)
+	}
+	return sb.String()
+}
+
+func buildComplementInstructions(discName string, existing []anthropic.GeneratedCard, plan complementPlan, limit int) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Disciplina: %s\nRevisão de cobertura do TRECHO acima. Uma primeira passada já gerou estes cards (frentes):\n", discName)
+	for _, c := range existing {
+		fmt.Fprintf(&sb, "- %s\n", c.Front)
+	}
+
+	if len(plan.missing) > 0 {
+		sb.WriteString("\nOs dispositivos a seguir ficaram SEM nenhum card:\n")
+		sb.WriteString(legal.FormatChecklist(plan.missing))
+		sb.WriteString("\nGere cards APENAS para esses dispositivos, com o ID exato no campo \"dispositivo\". " +
+			"Use seu julgamento: se um item for só remissão, título ou não tiver conteúdo cobrável em prova, omita-o.\n")
+	} else {
+		fmt.Fprintf(&sb, "\nA primeira passada gerou %d cards para um trecho com potencial estimado de cerca de %d. "+
+			"Releia o TRECHO e gere cards para regras, prazos, exceções, hipóteses e definições que ficaram de fora.\n", len(existing), limit)
+	}
+
+	fmt.Fprintf(&sb, "Não repita nem reformule os cards existentes. Se o trecho já estiver bem coberto, retorne uma lista vazia — não crie cards de enchimento. Gere NO MÁXIMO %d flashcards.", plan.budget)
+	return sb.String()
 }
 
 func buildReviewerPrompt(discName string, cards []anthropic.GeneratedCard) (system, user string) {
 	system = "Você é um revisor de qualidade de flashcards para concursos públicos brasileiros.\n" +
-		"Você recebe uma lista de flashcards já gerados a partir de diferentes trechos de um mesmo documento, " +
+		"Você recebe uma lista numerada de flashcards gerados a partir de diferentes trechos de um mesmo documento, " +
 		"processados separadamente e por isso com possível sobreposição.\n" +
-		"Remova duplicatas remanescentes e cards de baixa qualidade ou genéricos demais. " +
-		"NÃO invente cards novos que não estejam fundamentados na lista recebida — apenas curadoria. " +
-		"Retorne a lista final."
+		"Indique os números dos cards a REMOVER: duplicatas que cobram a mesma regra do mesmo jeito (mantenha a melhor versão), " +
+		"cards cujo verso não responde à frente, e cards genéricos demais para serem cobrados em prova. " +
+		"Preserve cards que tratem de comandos, prazos, exceções ou hipóteses distintas, mesmo quando pareçam semelhantes. " +
+		"Na dúvida, mantenha o card. Se nada precisar sair, retorne lista vazia."
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Disciplina: %s\nLista de flashcards gerados (%d no total):\n\n", discName, len(cards))
+	fmt.Fprintf(&sb, "Disciplina: %s\nLista de flashcards (%d no total):\n\n", discName, len(cards))
 	for i, c := range cards {
-		fmt.Fprintf(&sb, "%d. FRENTE: %s\n   VERSO: %s\n", i+1, c.Front, c.Back)
+		if c.Dispositivo != "" {
+			fmt.Fprintf(&sb, "%d. [%s] FRENTE: %s\n   VERSO: %s\n", i+1, c.Dispositivo, c.Front, c.Back)
+		} else {
+			fmt.Fprintf(&sb, "%d. FRENTE: %s\n   VERSO: %s\n", i+1, c.Front, c.Back)
+		}
 	}
 	return system, sb.String()
+}
+
+// applyRemovals drops the reviewer's 1-based indices from cards, ignoring
+// out-of-range and repeated ones. A review that would remove more than
+// maxReviewRemovalRatio of the list is discarded (returned as reviewErr)
+// rather than trusted.
+func applyRemovals(cards []anthropic.GeneratedCard, remove []int) ([]anthropic.GeneratedCard, string) {
+	drop := make(map[int]bool, len(remove))
+	for _, n := range remove {
+		if n >= 1 && n <= len(cards) {
+			drop[n-1] = true
+		}
+	}
+	if float64(len(drop)) > maxReviewRemovalRatio*float64(len(cards)) {
+		return cards, fmt.Sprintf("revisão descartada: removeria %d de %d cards", len(drop), len(cards))
+	}
+
+	kept := make([]anthropic.GeneratedCard, 0, len(cards)-len(drop))
+	for i, c := range cards {
+		if !drop[i] {
+			kept = append(kept, c)
+		}
+	}
+	return kept, ""
 }

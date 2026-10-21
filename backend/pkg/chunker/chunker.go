@@ -7,6 +7,7 @@ package chunker
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -17,18 +18,23 @@ import (
 const PageMarker = "[[PAGE"
 
 const (
-	DefaultTargetChars  = 20000 // ~5k tokens
+	// DefaultTargetChars is sized for latency, not context: a chunk's LLM
+	// call is bound by how many cards it must write, and the job finishes
+	// only when its slowest chunk does. ~6k chars of legislation is roughly
+	// 10-25 dispositivos — one call of ~30-60s — and more, smaller chunks
+	// spread across River's workers instead of queueing behind a few long ones.
+	DefaultTargetChars  = 6000 // ~1.5k tokens
 	DefaultOverlapChars = 200
 
 	// DefaultMaxChunks is a safety valve against truly pathological input
 	// (e.g. a non-text file misread as text), not a target — chunk jobs are
 	// cheap, independent, and checkpointed, and concurrency is already
 	// bounded by River's queue MaxWorkers, not by the chunk count. At
-	// ~20k chars/chunk this comfortably covers hundreds of pages, which
+	// ~6k chars/chunk this still covers hundreds of pages, which
 	// matters because pdf.js text extraction is noisy (a space inserted
 	// per text run) and can inflate char count well past a page's visible
 	// text.
-	DefaultMaxChunks = 200
+	DefaultMaxChunks = 600
 
 	// boundarySearchWindow bounds how far back from the target cut point we
 	// look for a natural boundary before giving up and hard-cutting.
@@ -93,10 +99,11 @@ func Split(text string, opts SplitOptions) ([]Chunk, error) {
 	start := 0
 	for start < len(text) {
 		end := start + opts.TargetChars
+		clean := false
 		if end >= len(text) {
 			end = len(text)
 		} else {
-			end = findBoundary(text, start, end)
+			end, clean = findBoundary(text, start, end)
 		}
 
 		chunks = append(chunks, Chunk{
@@ -117,7 +124,13 @@ func Split(text string, opts SplitOptions) ([]Chunk, error) {
 		// Next chunk starts a bit before this one ended (overlap), but must
 		// always make forward progress to avoid looping forever on
 		// pathological input (e.g. OverlapChars close to TargetChars).
-		nextStart := snapToRuneBoundary(text, end-opts.OverlapChars)
+		// A cut right before an article heading splits nothing, so it needs
+		// no overlap — and skipping it avoids duplicate cards for the tail of
+		// the previous article.
+		nextStart := end
+		if !clean {
+			nextStart = snapToRuneBoundary(text, end-opts.OverlapChars)
+		}
 		if nextStart <= start {
 			nextStart = snapForward(text, start+1)
 		}
@@ -127,30 +140,43 @@ func Split(text string, opts SplitOptions) ([]Chunk, error) {
 	return chunks, nil
 }
 
+// articleHeadingRe matches a legislation article heading ("Art. 5º",
+// "Art. 1.228"). Capitalised "Art." is a heading; cross-references are
+// written lowercase ("art. 37") — see pkg/legal.
+var articleHeadingRe = regexp.MustCompile(`\bArt\.?\s*\d`)
+
 // findBoundary looks backward from `end` (within boundarySearchWindow) for
-// a natural cut point: page marker > paragraph break > sentence end.
-// Falls back to a hard cut at `end` if none is found.
-func findBoundary(text string, start, end int) int {
+// a natural cut point: article heading > page marker > paragraph break >
+// sentence end. Falls back to a hard cut at `end` if none is found. clean
+// reports a cut that splits no unit of content (an article heading), so the
+// caller can skip the overlap.
+func findBoundary(text string, start, end int) (cut int, clean bool) {
 	windowStart := end - boundarySearchWindow
 	if windowStart < start {
 		windowStart = start
 	}
 	window := text[windowStart:end]
 
+	// A heading at the very start of the window would cut nothing off.
+	if locs := articleHeadingRe.FindAllStringIndex(window, -1); len(locs) > 0 {
+		if i := locs[len(locs)-1][0]; windowStart+i > start {
+			return windowStart + i, true
+		}
+	}
 	if i := strings.LastIndex(window, PageMarker); i >= 0 {
-		return windowStart + i
+		return windowStart + i, false
 	}
 	if i := strings.LastIndex(window, "\n\n"); i >= 0 {
-		return windowStart + i + 2
+		return windowStart + i + 2, false
 	}
 	if i := strings.LastIndex(window, ". "); i >= 0 {
-		return windowStart + i + 2
+		return windowStart + i + 2, false
 	}
 	// Hard cut: no natural boundary found. This is an arbitrary byte offset
 	// that may land inside a multi-byte UTF-8 character (accented Portuguese
 	// text is full of them) — snap it back to a valid rune boundary so the
 	// stored chunk text is never invalid UTF-8.
-	return snapToRuneBoundary(text, end)
+	return snapToRuneBoundary(text, end), false
 }
 
 // snapToRuneBoundary walks backward from i to the nearest valid UTF-8 rune
